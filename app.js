@@ -419,61 +419,101 @@ async function deleteFamily(id){ if(!confirm('Excluir este familiar?'))return; c
 /* -------------------------------------------------------------------------- */
 /* TRIBUNA                                                                     */
 /* -------------------------------------------------------------------------- */
-async function renderTribuna(){ const c=contextCeremony(); if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;} const data=await server('apiObterTribuna',c.ID_CERIMONIA); let html=`<div class="page-head"><div><div class="section-title">TRIBUNA</div><div class="small muted">${esc(c.NOME_EVENTO)}</div></div></div><div class="card"><div class="grid3"><div class="field"><label>Lógica</label><select id="tLogic"><option value="IMPAR" ${data.config.LOGICA_TRIBUNA==='IMPAR'?'selected':''}>ÍMPAR</option><option value="PAR" ${data.config.LOGICA_TRIBUNA==='PAR'?'selected':''}>PAR</option></select></div><div class="field"><label>Fileiras</label><input id="tRows" type="number" min="1" max="3" value="${data.config.NUM_FILEIRAS}"></div><div class="field"><label>Pessoas por fileira</label><input id="tSeats" type="number" min="1" max="25" value="${data.config.QTD_POR_FILEIRA}"></div></div><button class="btn primary" onclick="saveTribunaConfig()">ATUALIZAR COMPOSIÇÃO</button></div>`; if(data.avisos?.length)html+=data.avisos.map(a=>`<div class="notice">${esc(a)}</div>`).join(''); if(data.fileiras?.length)html+=`<div class="tribuna-wrap"><div class="tropa">FRENTE DA TROPA</div>${data.fileiras.map(fr=>`<div class="fileira-label">FILEIRA ${fr.numero}</div><div class="tribuna-row">${fr.posicoes.map(p=>`<div class="seat ${p.autoridade.PRESENCA?'arrived':''}"><div class="order">${esc(p.rotulo)}</div><div class="seat-name">${esc((p.autoridade.POSTO?p.autoridade.POSTO+' ':'')+(p.autoridade.NOME_GUERRA||p.autoridade.NOME_COMPLETO))}</div><div class="seat-role">${esc(p.funcao)}</div></div>`).join('')}</div>`).join('')}</div>`; else html+='<div class="empty">A composição ainda não pode ser exibida.</div>'; $('#main').innerHTML=html; }
-async function saveTribunaConfig(){ const c=contextCeremony(); await server('apiSalvarConfigTribuna',c.ID_CERIMONIA,{LOGICA_TRIBUNA:$('#tLogic').value,NUM_FILEIRAS:$('#tRows').value,QTD_POR_FILEIRA:$('#tSeats').value}); renderTribuna(); }
+function tribunaCircleHtml(p){
+  const g=p.autoridade||{},nome=(g.POSTO?g.POSTO+' ':'')+(g.NOME_GUERRA||g.NOME_COMPLETO||'');
+  return `<button class="seat-circle ${g.PRESENCA?'arrived':''}" title="${esc(nome)}" onclick="openGuestEventDetail('${esc(g.ID_CONVIDADO||'')}')"><span class="order">${esc(p.rotulo)}</span><span class="seat-name">${esc(nome)}</span>${p.funcao?`<span class="seat-role">${esc(p.funcao)}</span>`:''}</button>`;
+}
+function fitTribunaStage(){
+  const vp=$('.tribuna-viewport'),stage=$('.tribuna-stage');if(!vp||!stage)return;
+  stage.style.transform='none';
+  const base=Number(stage.dataset.baseWidth)||stage.scrollWidth||1;
+  const avail=Math.max(1,vp.clientWidth-8),scale=Math.min(1,avail/base);
+  stage.style.transform=`scale(${scale})`;
+  stage.style.transformOrigin='top center';
+  vp.style.height=Math.ceil(stage.scrollHeight*scale+8)+'px';
+}
+async function renderTribuna(){
+  const c=contextCeremony();if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;}
+  const data=await server('apiObterTribuna',c.ID_CERIMONIA);
+  let html=`<div class="page-head"><div><div class="section-title">TRIBUNA</div><div class="small muted">${esc(c.NOME_EVENTO)}</div></div></div><div class="card"><div class="grid3"><div class="field"><label>Lógica</label><select id="tLogic"><option value="IMPAR" ${data.config.LOGICA_TRIBUNA==='IMPAR'?'selected':''}>ÍMPAR</option><option value="PAR" ${data.config.LOGICA_TRIBUNA==='PAR'?'selected':''}>PAR</option></select></div><div class="field"><label>Fileiras</label><input id="tRows" type="number" min="1" max="3" value="${data.config.NUM_FILEIRAS}"></div><div class="field"><label>Pessoas por fileira</label><input id="tSeats" type="number" min="1" max="25" value="${data.config.QTD_POR_FILEIRA}"></div></div><button class="btn primary" onclick="saveTribunaConfig()">ATUALIZAR COMPOSIÇÃO</button></div>`;
+  if(data.avisos?.length)html+=data.avisos.map(a=>`<div class="notice">${esc(a)}</div>`).join('');
+  if(data.fileiras?.length){
+    const maxSeats=Math.max(...data.fileiras.map(fr=>fr.posicoes.length),1),baseWidth=Math.max(360,maxSeats*96);
+    html+=`<div class="tribuna-wrap"><div class="tropa">FRENTE DA TROPA</div><div class="tribuna-viewport"><div class="tribuna-stage" data-base-width="${baseWidth}" style="width:${baseWidth}px">${data.fileiras.map(fr=>`<div class="fileira-label">FILEIRA ${fr.numero}</div><div class="tribuna-row" style="--seat-count:${fr.posicoes.length}">${fr.posicoes.map(tribunaCircleHtml).join('')}</div>`).join('')}</div></div></div>`;
+  } else html+='<div class="empty">A composição ainda não pode ser exibida.</div>';
+  $('#main').innerHTML=html;requestAnimationFrame(fitTribunaStage);
+}
+async function saveTribunaConfig(){const c=contextCeremony();await server('apiSalvarConfigTribuna',c.ID_CERIMONIA,{LOGICA_TRIBUNA:$('#tLogic').value,NUM_FILEIRAS:$('#tRows').value,QTD_POR_FILEIRA:$('#tSeats').value});renderTribuna();}
 
 /* -------------------------------------------------------------------------- */
 /* NOMINATA                                                                    */
 /* -------------------------------------------------------------------------- */
 function nominataItemCard(i){
-  const isAut=i.TIPO_ITEM==='AUTORIDADE';
-  const avatar=isAut?photoHtml(i):`<div class="avatar placeholder">${i.ORDEM}</div>`;
-  const click=isAut?`onclick="openGuestOperationDetail('${i.REF}')"`:'';
-  const pres=isAut && i.PRESENTE===false?'<span class="badge pending">SEM PRESENÇA</span>':(isAut&&i.PRESENTE?'<span class="badge present">PRESENTE</span>':'');
-  return `<div class="person-card ${isAut?'clickable':''}" ${click}>${avatar}<div class="grow"><div class="person-name">${esc(i.TITULO)}</div><div class="person-meta-line"><span class="badge">${esc(i.TIPO_ITEM)}</span>${pres}</div></div><div class="order-controls"><button onclick="event.stopPropagation();moveNom('${i.ID_ITEM}',-1)">SUBIR</button><button onclick="event.stopPropagation();moveNom('${i.ID_ITEM}',1)">DESCER</button><button onclick="event.stopPropagation();removeNom('${i.ID_ITEM}')">REMOVER</button></div></div>`;
+  const isAut=i.TIPO_ITEM==='AUTORIDADE',isMsg=i.TIPO_ITEM==='MENSAGEM'||i.TIPO_ITEM==='TEXTO';
+  const avatar=isAut?photoHtml(i):`<div class="avatar placeholder">${isMsg?'MSG':esc(i.ORDEM)}</div>`;
+  const click=isAut?`onclick="openGuestOperationDetail('${i.REF}')"`:(isMsg?`onclick="openNominataMessage('${i.ID_ITEM}')"`:'');
+  const pres=isAut&&i.PRESENTE===false?'<span class="badge pending">SEM PRESENÇA</span>':(isAut&&i.PRESENTE?'<span class="badge present">PRESENTE</span>':'');
+  return `<div class="person-card ${isAut||isMsg?'clickable':''} nominata-card" ${click}>${avatar}<div class="grow"><div class="person-name">${esc(i.TITULO)}</div><div class="person-meta-line"><span class="badge">${esc(i.TIPO_ITEM)}</span>${pres}</div></div><div class="order-controls"><button onclick="event.stopPropagation();removeNom('${i.ID_ITEM}')">REMOVER</button></div></div>`;
 }
 
 async function renderNominata(){
-  const c=contextCeremony(); if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;}
-  const data=await server('apiNominataPainel',c.ID_CERIMONIA);
-  const items=data.items||[],guests=data.guests||[],fams=data.fams||[],msgs=data.msgs||[];
-  state.nomData={guests,fams,msgs}; state.nomItems=items;
-  let html=`<div class="page-head"><div><div class="section-title">NOMINATA</div><div class="small muted">${esc(c.NOME_EVENTO)} | ${items.length} itens</div></div><div class="page-actions"><button class="btn primary" onclick="openBulkNominata()">ADICIONAR VÁRIAS AUTORIDADES</button><button class="btn outline" onclick="openAddNominataItem()">OUTRO ITEM</button><button class="btn outline" onclick="openMessageBank()">MENSAGENS</button></div></div><div class="notice">Clique em uma autoridade da nominata para confirmar ou cancelar sua presença. A ordem da nominata é independente da ordem exibida no Evento.</div>`;
-  html+=items.length?`<div class="person-list">${items.map(nominataItemCard).join('')}</div>`:'<div class="empty">A nominata está vazia.</div>';
+  const c=contextCeremony();if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;}
+  const data=await server('apiNominataPainel',c.ID_CERIMONIA),items=data.items||[],guests=data.guests||[],fams=data.fams||[],msgs=data.msgs||[];
+  state.nomData={guests,fams,msgs};state.nomItems=items;
+  let html=`<div class="page-head"><div><div class="section-title">NOMINATA</div><div class="small muted">${esc(c.NOME_EVENTO)} | ${items.length} itens</div></div><div class="page-actions"><button class="btn primary" onclick="openBulkNominata()">ADICIONAR VÁRIAS AUTORIDADES</button><button class="btn outline" onclick="openAddNominataItem()">OUTRO ITEM</button><button class="btn outline" onclick="openMessageBank()">MENSAGENS</button></div></div><div class="notice">As autoridades permanecem sempre na ordem de precedência da cerimônia. Clique em uma autoridade para confirmar/cancelar presença. Clique em uma mensagem para editar ou reposicionar.</div>`;
+  html+=items.length?`<div class="person-list nominata-list">${items.map(nominataItemCard).join('')}</div>`:'<div class="empty">A nominata está vazia.</div>';
   $('#main').innerHTML=html;
 }
 
 function openBulkNominata(){
-  const d=state.nomData||{guests:[]}, usados=new Set((state.nomItems||[]).filter(i=>i.TIPO_ITEM==='AUTORIDADE').map(i=>i.REF));
-  const guests=(d.guests||[]).filter(g=>!usados.has(g.ID_CONVIDADO));
-  openModal(`${modalCloseButton()}<h2>Adicionar várias autoridades</h2><p class="small muted">Selecione quantas autoridades desejar. Elas serão inseridas na nominata na mesma ordem em que aparecem no Evento.</p><div class="actions compact"><button class="btn outline sm" onclick="bulkNomSelect('CONFIRMADOS')">MARCAR CONFIRMADOS</button><button class="btn outline sm" onclick="bulkNomSelect('PRESENTES')">MARCAR PRESENTES</button><button class="btn outline sm" onclick="bulkNomSelect('TODOS')">MARCAR TODOS</button><button class="btn outline sm" onclick="bulkNomSelect('NENHUM')">LIMPAR</button></div><div class="bulk-list">${guests.map(g=>`<label class="bulk-row"><input type="checkbox" class="nom-bulk" value="${esc(g.ID_CONVIDADO)}" data-status="${esc(g.STATUS_CONFIRMACAO)}" data-present="${g.PRESENCA?'1':'0'}"><span><strong>${esc((g.POSTO?g.POSTO+' ':'')+(g.NOME_GUERRA||g.NOME_COMPLETO))}</strong><small>${esc(g.CARGO_ATUAL||g.NOME_COMPLETO)}</small></span>${g.PRESENCA?'<span class="badge present">PRESENTE</span>':badgeStatus(g.STATUS_CONFIRMACAO)}</label>`).join('')||'<div class="empty">Todas as autoridades já estão na nominata.</div>'}</div><button class="btn primary block" onclick="submitBulkNominata()">ADICIONAR SELECIONADAS</button>`,true);
+  const d=state.nomData||{guests:[]},usados=new Set((state.nomItems||[]).filter(i=>i.TIPO_ITEM==='AUTORIDADE').map(i=>i.REF));
+  const guests=(d.guests||[]).filter(g=>!usados.has(g.ID_CONVIDADO)&&(g.STATUS_CONFIRMACAO==='CONFIRMADO'||g.STATUS_CONFIRMACAO==='PENDENTE'));
+  openModal(`${modalCloseButton()}<h2>Adicionar várias autoridades</h2><p class="small muted">Apenas PENDENTES e CONFIRMADAS são exibidas. Independentemente da ordem de seleção, elas entram sempre na ordem de precedência da cerimônia.</p><div class="actions compact"><button class="btn outline sm" onclick="bulkNomSelect('CONFIRMADOS')">MARCAR CONFIRMADOS</button><button class="btn outline sm" onclick="bulkNomSelect('PENDENTES')">MARCAR PENDENTES</button><button class="btn outline sm" onclick="bulkNomSelect('TODOS')">MARCAR TODOS</button><button class="btn outline sm" onclick="bulkNomSelect('NENHUM')">LIMPAR</button></div><div class="bulk-list">${guests.map(g=>`<label class="bulk-row"><input type="checkbox" class="nom-bulk" value="${esc(g.ID_CONVIDADO)}" data-status="${esc(g.STATUS_CONFIRMACAO)}"><span><strong>${esc((g.POSTO?g.POSTO+' ':'')+(g.NOME_GUERRA||g.NOME_COMPLETO))}</strong><small>${esc(g.CARGO_ATUAL||g.NOME_COMPLETO)}</small></span>${badgeStatus(g.STATUS_CONFIRMACAO)}</label>`).join('')||'<div class="empty">Não há autoridades pendentes ou confirmadas disponíveis para inclusão.</div>'}</div><button class="btn primary block" onclick="submitBulkNominata()">ADICIONAR SELECIONADAS</button>`,true);
 }
-function bulkNomSelect(mode){
-  document.querySelectorAll('.nom-bulk').forEach(cb=>{
-    if(mode==='TODOS')cb.checked=true;
-    else if(mode==='NENHUM')cb.checked=false;
-    else if(mode==='PRESENTES')cb.checked=cb.dataset.present==='1';
-    else if(mode==='CONFIRMADOS')cb.checked=String(cb.dataset.status).includes('CONFIRM');
-  });
-}
-async function submitBulkNominata(){
-  const ids=[...document.querySelectorAll('.nom-bulk:checked')].map(x=>x.value);
-  if(!ids.length){showToast('Selecione ao menos uma autoridade.');return;}
-  const c=contextCeremony(); await server('apiAdicionarItensNominataLote',c.ID_CERIMONIA,ids);
-  closeModal(); showToast(ids.length+' autoridade(s) adicionada(s).'); renderNominata();
-}
+function bulkNomSelect(mode){document.querySelectorAll('.nom-bulk').forEach(cb=>{if(mode==='TODOS')cb.checked=true;else if(mode==='NENHUM')cb.checked=false;else if(mode==='CONFIRMADOS')cb.checked=String(cb.dataset.status)==='CONFIRMADO';else if(mode==='PENDENTES')cb.checked=String(cb.dataset.status)==='PENDENTE';});}
+async function submitBulkNominata(){const ids=[...document.querySelectorAll('.nom-bulk:checked')].map(x=>x.value);if(!ids.length){showToast('Selecione ao menos uma autoridade.');return;}const c=contextCeremony();await server('apiAdicionarItensNominataLote',c.ID_CERIMONIA,ids);closeModal();showToast(ids.length+' autoridade(s) adicionada(s).');renderNominata();}
 
+function nominataAuthorityOptions(selected=''){
+  const auts=(state.nomItems||[]).filter(i=>i.TIPO_ITEM==='AUTORIDADE');
+  return auts.map(a=>`<option value="${esc(a.REF)}" ${a.REF===selected?'selected':''}>${esc(a.REF_NOME||a.TITULO)}</option>`).join('');
+}
+function anchorFieldsHtml(anchorRef='',anchorSide='ANTES'){
+  const opts=nominataAuthorityOptions(anchorRef);
+  if(!opts)return '<div class="notice">Adicione pelo menos uma autoridade à nominata antes de posicionar mensagens.</div>';
+  return `<div class="grid2"><div class="field"><label>Posição</label><select id="nAnchorSide"><option value="ANTES" ${anchorSide==='ANTES'?'selected':''}>ANTES DE</option><option value="DEPOIS" ${anchorSide==='DEPOIS'?'selected':''}>DEPOIS DE</option></select></div><div class="field"><label>Autoridade de referência</label><select id="nAnchorRef">${opts}</select></div></div>`;
+}
 function openAddNominataItem(){
   const d=state.nomData||{guests:[],fams:[],msgs:[]};
-  openModal(`${modalCloseButton()}<h2>Adicionar item à nominata</h2><div class="field"><label>Tipo</label><select id="nType" onchange="updateNomRef()"><option value="AUTORIDADE">Uma autoridade</option><option value="FAMILIAR">Familiar</option><option value="MENSAGEM">Mensagem predefinida</option><option value="TEXTO">Texto livre</option></select></div><div class="field" id="nRefWrap"><label>Referência</label><select id="nRef"></select></div><div class="field" id="nTextWrap"><label>Texto livre / complemento</label><textarea id="nText"></textarea></div><button class="btn primary block" onclick="submitNomItem()">ADICIONAR</button>`); updateNomRef();
+  openModal(`${modalCloseButton()}<h2>Adicionar item à nominata</h2><div class="field"><label>Tipo</label><select id="nType" onchange="updateNomRef()"><option value="AUTORIDADE">Uma autoridade</option><option value="FAMILIAR">Familiar</option><option value="MENSAGEM">Mensagem predefinida</option><option value="TEXTO">Texto livre</option></select></div><div class="field" id="nRefWrap"><label>Referência</label><select id="nRef"></select></div><div class="field" id="nTextWrap"><label>Texto / edição</label><textarea id="nText" style="text-transform:uppercase"></textarea></div><div id="nAnchorWrap"></div><button class="btn primary block" onclick="submitNomItem()">ADICIONAR</button>`);updateNomRef();
 }
-function updateNomRef(){ const type=$('#nType').value,d=state.nomData||{}; let opts=''; if(type==='AUTORIDADE')opts=(d.guests||[]).map(g=>`<option value="${g.ID_CONVIDADO}">${esc(g.POSTO+' '+g.NOME_GUERRA)}</option>`).join(''); if(type==='FAMILIAR')opts=(d.fams||[]).map(f=>`<option value="${f.ID_FAMILIAR}">${esc(f.NOME+' — '+f.VINCULO)}</option>`).join(''); if(type==='MENSAGEM')opts=(d.msgs||[]).map(m=>`<option value="${m.ID_MENSAGEM}">${esc(m.TEXTO)}</option>`).join(''); $('#nRef').innerHTML=opts; $('#nRefWrap').classList.toggle('hidden',type==='TEXTO'); }
-async function submitNomItem(){ const c=contextCeremony(); await server('apiAdicionarItemNominata',{ID_CERIMONIA:c.ID_CERIMONIA,TIPO_ITEM:$('#nType').value,REFERENCIA_ID:$('#nRef').value,TEXTO_CUSTOMIZADO:$('#nText').value}); closeModal(); renderNominata(); }
-async function moveNom(id,d){ const c=contextCeremony(); await server('apiMoverItemNominata',c.ID_CERIMONIA,id,d); renderNominata(); }
-async function removeNom(id){ const c=contextCeremony(); await server('apiRemoverItemNominata',c.ID_CERIMONIA,id); renderNominata(); }
-async function openMessageBank(){ const msgs=await server('apiListarMensagensNominata'); openModal(`${modalCloseButton()}<h2>Mensagens predefinidas</h2><div class="field"><label>Nova mensagem</label><textarea id="mbText"></textarea></div><button class="btn primary" onclick="addMessageBank()">ADICIONAR</button><div class="section-title">CADASTRADAS</div>${msgs.map(m=>`<div class="row between card"><div class="small">${esc(m.TEXTO)}</div><button class="btn danger sm" onclick="deleteMessageBank('${m.ID_MENSAGEM}')">EXCLUIR</button></div>`).join('')}`); }
-async function addMessageBank(){ await server('apiAdicionarMensagemPadrao',$('#mbText').value); closeModal(); await renderNominata(); showToast('Mensagem adicionada.'); }
-async function deleteMessageBank(id){ await server('apiExcluirMensagemPadrao',id); closeModal(); await renderNominata(); showToast('Mensagem removida.'); }
+function updateNomRef(){
+  const type=$('#nType').value,d=state.nomData||{};let opts='';
+  if(type==='AUTORIDADE')opts=(d.guests||[]).filter(g=>g.STATUS_CONFIRMACAO==='CONFIRMADO'||g.STATUS_CONFIRMACAO==='PENDENTE').map(g=>`<option value="${g.ID_CONVIDADO}">${esc(g.POSTO+' '+g.NOME_GUERRA)}</option>`).join('');
+  if(type==='FAMILIAR')opts=(d.fams||[]).map(f=>`<option value="${f.ID_FAMILIAR}">${esc(f.NOME+' — '+f.VINCULO)}</option>`).join('');
+  if(type==='MENSAGEM')opts=(d.msgs||[]).map(m=>`<option value="${m.ID_MENSAGEM}">${esc(m.TEXTO)}</option>`).join('');
+  $('#nRef').innerHTML=opts;$('#nRefWrap').classList.toggle('hidden',type==='TEXTO');
+  const msg=type==='MENSAGEM'||type==='TEXTO';$('#nTextWrap').classList.toggle('hidden',type==='AUTORIDADE'||type==='FAMILIAR');$('#nAnchorWrap').innerHTML=msg?anchorFieldsHtml() : '';
+}
+async function submitNomItem(){
+  const c=contextCeremony(),type=$('#nType').value,msg=type==='MENSAGEM'||type==='TEXTO';
+  await server('apiAdicionarItemNominata',{ID_CERIMONIA:c.ID_CERIMONIA,TIPO_ITEM:type,REFERENCIA_ID:$('#nRef')?.value||'',TEXTO_CUSTOMIZADO:($('#nText')?.value||'').toUpperCase(),ANCHOR_REF:msg?($('#nAnchorRef')?.value||''):'',ANCHOR_SIDE:msg?($('#nAnchorSide')?.value||'ANTES'):''});
+  closeModal();renderNominata();
+}
+async function removeNom(id){const c=contextCeremony();await server('apiRemoverItemNominata',c.ID_CERIMONIA,id);renderNominata();}
+
+function openNominataMessage(id){
+  const it=(state.nomItems||[]).find(x=>x.ID_ITEM===id);if(!it)return;
+  openModal(`${modalCloseButton()}<h2>Editar mensagem</h2><div class="field"><label>Texto</label><textarea id="editNomText" style="text-transform:uppercase">${esc(it.TITULO)}</textarea></div>${anchorFieldsHtml(it.ANCHOR_REF,it.ANCHOR_SIDE||'ANTES')}<div class="actions"><button class="btn outline" onclick="moveNomMessage('${id}',-1)">SUBIR MENSAGEM</button><button class="btn outline" onclick="moveNomMessage('${id}',1)">DESCER MENSAGEM</button><button class="btn primary" onclick="saveNomMessage('${id}')">SALVAR</button></div>`);
+}
+async function saveNomMessage(id){const c=contextCeremony();await server('apiEditarItemNominata',c.ID_CERIMONIA,id,{TEXTO:($('#editNomText').value||'').toUpperCase(),ANCHOR_REF:$('#nAnchorRef')?.value||'',ANCHOR_SIDE:$('#nAnchorSide')?.value||'ANTES'});closeModal();renderNominata();}
+async function moveNomMessage(id,d){const c=contextCeremony();await server('apiMoverItemNominata',c.ID_CERIMONIA,id,d);closeModal();renderNominata();}
+
+async function openMessageBank(){
+  const msgs=await server('apiListarMensagensNominata');
+  openModal(`${modalCloseButton()}<h2>Mensagens predefinidas</h2><div class="field"><label>Nova mensagem</label><textarea id="mbText" style="text-transform:uppercase"></textarea></div><button class="btn primary" onclick="addMessageBank()">ADICIONAR</button><div class="section-title">CADASTRADAS</div>${msgs.map(m=>`<div class="row between card"><div class="small nominata-uppercase">${esc(m.TEXTO)}</div><button class="btn danger sm" onclick="deleteMessageBank('${m.ID_MENSAGEM}')">EXCLUIR</button></div>`).join('')}`);
+}
+async function addMessageBank(){await server('apiAdicionarMensagemPadrao',($('#mbText').value||'').toUpperCase());closeModal();await renderNominata();showToast('Mensagem adicionada.');}
+async function deleteMessageBank(id){await server('apiExcluirMensagemPadrao',id);closeModal();await renderNominata();showToast('Mensagem removida.');}
 
 /* -------------------------------------------------------------------------- */
 /* ESTATÍSTICAS                                                                */
@@ -492,5 +532,7 @@ async function removeAuthorityFromGroup(id,a){ await server('apiRemoverAutoridad
 async function renderDocumentos(){ const c=contextCeremony(); if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;} $('#main').innerHTML=`<div class="page-head"><div><div class="section-title">GERAR ARQUIVOS</div><div class="small muted">${esc(c.NOME_EVENTO)}</div></div></div><div class="card"><p class="small muted">Os arquivos são gerados com os dados atuais da cerimônia e recebem o rodapé do SGCM 2.0.</p><div class="actions"><button class="btn primary" onclick="genDoc('nominata')">GERAR ANEXO À LOCUÇÃO</button><button class="btn primary" onclick="genDoc('tribuna')">GERAR TRIBUNA DE HONRA</button></div><div id="docResult"></div></div>`; }
 async function genDoc(type){ const c=contextCeremony(); $('#docResult').innerHTML='<p class="small muted">Gerando documento...</p>'; try{ const r=await server(type==='tribuna'?'apiGerarTribunaDocumento':'apiGerarNominata',c.ID_CERIMONIA); $('#docResult').innerHTML=`<p><a class="btn outline" href="${esc(r.url)}" target="_blank">ABRIR DOCUMENTO GERADO</a></p><p class="small muted">${esc(r.nome)}</p>`; }catch(e){ $('#docResult').innerHTML=`<div class="notice danger-notice">${esc(e.message)}</div>`; } }
 function renderGuia(){ $('#main').innerHTML=`<div class="section-title">GUIA RÁPIDO</div><div class="card"><p><b>Planejamento:</b> use as abas Cxxx_CONVIDADOS e Cxxx_FAMILIARES para importar e organizar convidados, familiares e status de confirmação.</p><p><b>Operação:</b> Recepção e Presentes exibem somente os dados necessários à equipe de recepção. Ajustes de honras, presidência, anfitrião, tribuna e nominata ficam em Evento/Cerimonial.</p><p><b>Banco:</b> AUTORIDADES é exibida no aplicativo na mesma ordem física da planilha. O cadastro pode ser corrigido pelo aplicativo durante a cerimônia.</p><p><b>Fotos:</b> ausência de fotografia ou outro dado nunca bloqueia o convidado; o Evento apenas sinaliza o cadastro incompleto.</p><p><b>Instalação:</b> o frontend é publicado no GitHub Pages e o Apps Script atua somente como API.</p></div>`; }
+
+window.addEventListener('resize',()=>{if(state.screen==='tribuna')fitTribunaStage();});
 
 boot();
