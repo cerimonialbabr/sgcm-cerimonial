@@ -1,4 +1,4 @@
-const CACHE_NAME='sgcm-shell-20260809-08';
+const CACHE_NAME='sgcm-shell-20260809-10';
 const SHELL=[
   './','./index.html','./styles.css','./app.js','./config.js','./dashboard.html','./dashboard.css','./dashboard.js',
   './manifest.webmanifest','./assets/logo.png','./assets/logo.svg','./assets/favicon.svg',
