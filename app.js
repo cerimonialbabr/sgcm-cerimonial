@@ -425,12 +425,34 @@ function tribunaCircleHtml(p){
 }
 function fitTribunaStage(){
   const vp=$('.tribuna-viewport'),stage=$('.tribuna-stage');if(!vp||!stage)return;
-  stage.style.transform='none';
   const base=Number(stage.dataset.baseWidth)||stage.scrollWidth||1;
-  const avail=Math.max(1,vp.clientWidth-8),scale=Math.min(1,avail/base);
-  stage.style.transform=`scale(${scale})`;
+  const isMobile=window.matchMedia('(pointer: coarse)').matches||window.innerWidth<=900;
+
+  stage.style.transform='none';
+  stage.style.left='auto';
+  stage.style.position='relative';
   stage.style.transformOrigin='top center';
-  vp.style.height=Math.ceil(stage.scrollHeight*scale+8)+'px';
+
+  if(isMobile){
+    // Em celular, não reduzimos os círculos a ponto de ficarem ilegíveis.
+    // A composição permanece em tamanho útil e o usuário desloca horizontalmente.
+    vp.style.overflowX='auto';
+    vp.style.overflowY='hidden';
+    vp.style.height='auto';
+    stage.style.width=base+'px';
+    stage.style.margin='0 auto';
+    return;
+  }
+
+  // Desktop: centraliza o palco e reduz somente o necessário para caber integralmente.
+  vp.style.overflow='hidden';
+  const avail=Math.max(1,vp.clientWidth-24);
+  const scale=Math.min(1,avail/base);
+  stage.style.width=base+'px';
+  stage.style.left='50%';
+  stage.style.margin='0';
+  stage.style.transform=`translateX(-50%) scale(${scale})`;
+  vp.style.height=Math.ceil(stage.scrollHeight*scale+16)+'px';
 }
 async function renderTribuna(){
   const c=contextCeremony();if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;}
