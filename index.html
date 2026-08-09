@@ -2,47 +2,100 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <meta name="theme-color" content="#082466">
-  <title>SGCM</title>
-  <link rel="stylesheet" href="styles.css?v=20260809-01">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b2c66">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="SGCM">
+  <title>SGCM | Sistema de Gerenciamento de Cerimonial Militar</title>
+  <link rel="manifest" href="manifest.webmanifest?v=20260809-05">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="styles.css?v=20260809-05">
 </head>
 <body>
-<div id="app">
+<div id="app" class="app-shell">
   <header class="topbar">
-    <button class="icon-btn" onclick="toggleDrawer(true)" aria-label="Abrir menu"><span class="menu-lines"></span></button>
-    <div class="top-title"><strong>SGCM</strong><small id="headerContext">Carregando...</small></div>
-    <button class="icon-btn text-icon" onclick="refreshCurrent()" aria-label="Atualizar">ATUAL.</button>
+    <div class="brand">
+      <img class="brand-logo" src="assets/logo.png" onerror="this.onerror=null;this.src='assets/logo.svg'" alt="Logo SGCM">
+      <div class="brand-copy">
+        <div class="brand-name">Sistema de Gerenciamento de Cerimonial Militar</div>
+        <div class="brand-meta"><span class="brand-acronym">SGCM</span><span id="headerContext">Carregando...</span></div>
+      </div>
+    </div>
+    <button class="mobile-menu-button" onclick="toggleDrawer(true)" aria-label="Abrir menu">
+      <span class="menu-lines"></span>
+    </button>
   </header>
+
   <div id="contextBanner" class="context-banner hidden"></div>
-  <main id="main" class="main"><div class="loading">Carregando sistema...</div></main>
-  <nav class="bottom-nav">
-    <button data-screen="evento" onclick="navigate('evento')">EVENTO</button>
-    <button data-screen="recepcao" onclick="navigate('recepcao')">RECEPÇÃO</button>
-    <button data-screen="presentes" onclick="navigate('presentes')">PRESENTES</button>
-    <button data-screen="familiares" onclick="navigate('familiares')">FAMILIARES</button>
+
+  <div class="workspace">
+    <aside class="desktop-sidebar" aria-label="Navegação principal">
+      <div class="nav-group-title">OPERAÇÃO</div>
+      <button data-nav-screen="evento" onclick="navigate('evento')">Evento</button>
+      <button data-nav-screen="recepcao" onclick="navigate('recepcao')">Recepção</button>
+      <button data-nav-screen="presentes" onclick="navigate('presentes')">Presentes</button>
+      <button data-nav-screen="familiares" onclick="navigate('familiares')">Familiares</button>
+      <div class="nav-separator"></div>
+      <div class="nav-group-title">CERIMONIAL</div>
+      <button data-nav-screen="cerimonias" onclick="navigate('cerimonias')">Cerimônias</button>
+      <button data-nav-screen="autoridades" onclick="navigate('autoridades')">Autoridades</button>
+      <button data-nav-screen="tribuna" onclick="navigate('tribuna')">Tribuna</button>
+      <button data-nav-screen="nominata" onclick="navigate('nominata')">Nominata</button>
+      <button data-nav-screen="estatisticas" onclick="navigate('estatisticas')">Estatísticas</button>
+      <button data-nav-screen="documentos" onclick="navigate('documentos')">Gerar arquivos</button>
+      <button data-nav-screen="guia" onclick="navigate('guia')">Guia rápido</button>
+    </aside>
+
+    <main id="main" class="main"><div class="loading">Carregando sistema...</div></main>
+  </div>
+
+  <nav class="mobile-bottom-nav" aria-label="Navegação operacional">
+    <button data-nav-screen="evento" onclick="navigate('evento')">Evento</button>
+    <button data-nav-screen="recepcao" onclick="navigate('recepcao')">Recepção</button>
+    <button data-nav-screen="presentes" onclick="navigate('presentes')">Presentes</button>
+    <button data-nav-screen="familiares" onclick="navigate('familiares')">Familiares</button>
   </nav>
+
   <footer class="app-footer">
     <div>Desenvolvido por Maj Av Ranyer</div>
     <div>Seção de Cerimonial Militar da Base Aérea de Brasília</div>
     <div>Versão 2.0 - 2026</div>
   </footer>
 </div>
+
 <div id="drawerBackdrop" class="backdrop hidden" onclick="toggleDrawer(false)"></div>
 <aside id="drawer" class="drawer">
-  <div class="drawer-head"><strong>SGCM</strong><button class="close-btn" onclick="toggleDrawer(false)">FECHAR</button></div>
-  <button onclick="sideNavigate('cerimonias')">CERIMÔNIAS</button>
-  <button onclick="sideNavigate('autoridades')">AUTORIDADES</button>
-  <button onclick="sideNavigate('tribuna')">TRIBUNA</button>
-  <button onclick="sideNavigate('nominata')">NOMINATA</button>
-  <button onclick="sideNavigate('estatisticas')">ESTATÍSTICAS</button>
-  <button onclick="sideNavigate('documentos')">GERAR ARQUIVOS</button>
-  <button onclick="sideNavigate('guia')">GUIA RÁPIDO</button>
-  <div class="drawer-version">Sistema de Gerenciamento de Cerimonial Militar<br>Versão 2.0</div>
+  <div class="drawer-head">
+    <div class="drawer-brand">
+      <img src="assets/logo.png" onerror="this.onerror=null;this.src='assets/logo.svg'" alt="Logo SGCM">
+      <div><strong>SGCM</strong><small>Sistema de Gerenciamento de Cerimonial Militar</small></div>
+    </div>
+    <button class="close-btn" onclick="toggleDrawer(false)">Fechar</button>
+  </div>
+  <button data-nav-screen="cerimonias" onclick="sideNavigate('cerimonias')">Cerimônias</button>
+  <button data-nav-screen="autoridades" onclick="sideNavigate('autoridades')">Autoridades</button>
+  <button data-nav-screen="tribuna" onclick="sideNavigate('tribuna')">Tribuna</button>
+  <button data-nav-screen="nominata" onclick="sideNavigate('nominata')">Nominata</button>
+  <button data-nav-screen="estatisticas" onclick="sideNavigate('estatisticas')">Estatísticas</button>
+  <button data-nav-screen="documentos" onclick="sideNavigate('documentos')">Gerar arquivos</button>
+  <button data-nav-screen="guia" onclick="sideNavigate('guia')">Guia rápido</button>
+  <div class="drawer-version">Versão 2.0 - 2026</div>
 </aside>
-<div id="modalBackdrop" class="modal-backdrop hidden" onclick="closeModal(event)"><div id="modal" class="modal" onclick="event.stopPropagation()"></div></div>
+
+<div id="modalBackdrop" class="modal-backdrop hidden" onclick="closeModal(event)">
+  <div id="modal" class="modal" onclick="event.stopPropagation()"></div>
+</div>
 <div id="toast" class="toast hidden"></div>
-<script src="config.js?v=20260809-01"></script>
-<script src="app.js?v=20260809-01"></script>
+
+<script src="config.js?v=20260809-05"></script>
+<script src="app.js?v=20260809-05"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js?v=20260809-05', {updateViaCache:'none'}).catch(() => {}));
+  }
+</script>
 </body>
 </html>
