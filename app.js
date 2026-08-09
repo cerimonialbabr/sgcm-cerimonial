@@ -8,7 +8,8 @@ const state = {
   authoritySearchTimer: null,
   nomData: null,
   nomItems: [],
-  statsConfig: null
+  statsConfig: null,
+  addGuestSelectedAuthority: null
 };
 
 const $ = s => document.querySelector(s);
@@ -33,7 +34,7 @@ const SGCM_READ_ACTIONS = new Set([
   'apiObterConvidado','apiObterConvidadoResumo','apiListarAutoridades','apiListarAutoridadesPagina',
   'apiObterAutoridade','apiListarFamiliares','apiObterTribuna','apiListarNominata','apiNominataPainel',
   'apiListarMensagensNominata','apiEstatisticas','apiListarGruposEstatistica',
-  'apiOpcoesEstatistica','apiFotoBase64','apiResultadoComando'
+  'apiOpcoesEstatistica','apiDashboard','apiFotoBase64','apiResultadoComando'
 ]);
 
 function apiUrl(){
@@ -314,13 +315,31 @@ async function openGuestOperationDetail(id){
 /* -------------------------------------------------------------------------- */
 /* ADICIONAR CONVIDADO / CADASTRAR NO BANCO                                   */
 /* -------------------------------------------------------------------------- */
-async function openAddGuest(){
+async function openAddGuest(preselectId=''){
   const c=contextCeremony(), guests=await server('apiListarConvidados',c.ID_CERIMONIA,'TODOS');
   const labels=eventOrderMap(guests);
-  openModal(`${modalCloseButton()}<h2>Adicionar convidado</h2><div class="field"><label>Pesquisar no banco de autoridades</label><input id="agSearch" oninput="searchAuthorityForGuest()" placeholder="Nome, posto ou cargo"></div><div id="agResults" class="person-list"></div><div class="grid2"><div class="field"><label>Inserir em relação a</label><select id="agRef"><option value="">Final da lista</option>${guests.map(g=>`<option value="${g.ID_CONVIDADO}">${esc(labels[g.ID_CONVIDADO]+' — '+g.POSTO+' '+g.NOME_GUERRA)}</option>`).join('')}</select></div><div class="field"><label>Posição</label><select id="agPos"><option value="DEPOIS">Depois</option><option value="ANTES">Antes</option></select></div></div><div class="actions"><button class="btn outline" onclick="openAuthorityForm('',true)">NOVA AUTORIDADE</button></div>`,true);
+  state.addGuestSelectedAuthority=preselectId||null;
+  openModal(`${modalCloseButton()}<h2>Adicionar convidado</h2><p class="small muted">Selecione a autoridade, escolha onde ela entrará e somente depois confirme em ADICIONAR À CERIMÔNIA.</p><div class="field"><label>Pesquisar no banco de autoridades</label><input id="agSearch" oninput="searchAuthorityForGuest()" placeholder="Nome, posto ou cargo"></div><div id="agSelected" class="selected-guest-box">${preselectId?'<div class="small muted">Carregando autoridade selecionada...</div>':'<div class="small muted">Nenhuma autoridade selecionada.</div>'}</div><div id="agResults" class="person-list add-guest-results"></div><div class="grid2 add-guest-position"><div class="field"><label>Inserir em relação a</label><select id="agRef"><option value="">Final da lista</option>${guests.map(g=>`<option value="${g.ID_CONVIDADO}">${esc(labels[g.ID_CONVIDADO]+' — '+g.POSTO+' '+g.NOME_GUERRA)}</option>`).join('')}</select></div><div class="field"><label>Posição</label><select id="agPos"><option value="DEPOIS">Depois</option><option value="ANTES">Antes</option></select></div></div><div class="modal-action-row"><button class="btn outline" onclick="openAuthorityForm('',true)">NOVA AUTORIDADE</button><button id="agAddBtn" class="btn primary" onclick="confirmAddSelectedAuthority()" ${preselectId?'':'disabled'}>ADICIONAR À CERIMÔNIA</button></div>`,true);
+  if(preselectId) await selectAuthorityForGuest(preselectId);
 }
-async function searchAuthorityForGuest(){ const q=$('#agSearch').value; if(q.length<2){$('#agResults').innerHTML='';return;} const page=await server('apiListarAutoridadesPagina',q,0,30); $('#agResults').innerHTML=page.items.map(a=>`<div class="person-card clickable" onclick="addSelectedAuthority('${a.ID_AUTORIDADE}')">${photoHtml(a)}<div class="grow"><div class="person-name">${esc((a.POSTO?a.POSTO+' ':'')+(a.NOME_GUERRA||a.NOME_COMPLETO))}</div><div class="person-sub">${esc(a.CARGO_ATUAL)}</div></div><div class="person-right"><span class="badge active">ADICIONAR</span></div></div>`).join('')||'<div class="empty">Nenhuma autoridade encontrada.</div>'; }
-async function addSelectedAuthority(id){ const c=contextCeremony(); await server('apiAdicionarConvidado',c.ID_CERIMONIA,{ID_AUTORIDADE:id,REFERENCIA_ID:$('#agRef').value,POSICAO:$('#agPos').value,STATUS_CONFIRMACAO:'PENDENTE'}); cacheRemove(ceremonyCacheKey('evento',c.ID_CERIMONIA)); closeModal(); showToast('Convidado adicionado.'); renderEvento(); }
+async function searchAuthorityForGuest(){
+  const q=$('#agSearch').value; if(q.length<2){$('#agResults').innerHTML='';return;}
+  const page=await server('apiListarAutoridadesPagina',q,0,30);
+  $('#agResults').innerHTML=page.items.map(a=>`<div class="person-card clickable selectable-authority ${state.addGuestSelectedAuthority===a.ID_AUTORIDADE?'selected':''}" onclick="selectAuthorityForGuest('${a.ID_AUTORIDADE}')">${photoHtml(a)}<div class="grow"><div class="person-name">${esc((a.POSTO?a.POSTO+' ':'')+(a.NOME_GUERRA||a.NOME_COMPLETO))}</div><div class="person-sub">${esc(a.CARGO_ATUAL)}</div></div><div class="person-right"><span class="badge ${state.addGuestSelectedAuthority===a.ID_AUTORIDADE?'present':'active'}">${state.addGuestSelectedAuthority===a.ID_AUTORIDADE?'SELECIONADA':'SELECIONAR'}</span></div></div>`).join('')||'<div class="empty">Nenhuma autoridade encontrada.</div>';
+}
+async function selectAuthorityForGuest(id){
+  state.addGuestSelectedAuthority=id;
+  const a=await server('apiObterAutoridade',id);
+  if($('#agSelected')) $('#agSelected').innerHTML=`<div class="selected-authority">${photoHtml(a)}<div class="grow"><div class="small muted">AUTORIDADE SELECIONADA</div><div class="person-name">${esc((a.POSTO?a.POSTO+' ':'')+(a.NOME_GUERRA||a.NOME_COMPLETO))}</div><div class="person-sub">${esc(a.CARGO_ATUAL||a.NOME_COMPLETO)}</div></div></div>`;
+  if($('#agAddBtn')) $('#agAddBtn').disabled=false;
+  if($('#agSearch') && $('#agSearch').value.length>=2) await searchAuthorityForGuest();
+}
+async function confirmAddSelectedAuthority(){
+  const id=state.addGuestSelectedAuthority; if(!id){showToast('Selecione uma autoridade.');return;}
+  const c=contextCeremony();
+  await server('apiAdicionarConvidado',c.ID_CERIMONIA,{ID_AUTORIDADE:id,REFERENCIA_ID:$('#agRef').value,POSICAO:$('#agPos').value,STATUS_CONFIRMACAO:'PENDENTE'});
+  cacheRemove(ceremonyCacheKey('evento',c.ID_CERIMONIA)); closeModal(); state.addGuestSelectedAuthority=null; showToast('Convidado adicionado.'); renderEvento();
+}
 
 async function openRegisterGuestAuthority(id){
   const c=contextCeremony(),g=await server('apiObterConvidado',c.ID_CERIMONIA,id); if(!g)return;
@@ -381,7 +400,7 @@ async function saveAuthority(id,addAfter){
   if(f){const img=await readImageForUpload(f);payload.FOTO_NOME=img.name;payload.FOTO_MIME=img.mime;payload.FOTO_BASE64=img.data;}
   const a=await server('apiSalvarAutoridade',payload); closeModal(); showToast('Autoridade salva.');
   cacheRemove('authority_first_page');
-  if(addAfter){ await openAddGuest(); $('#agSearch').value=a.NOME_COMPLETO; await searchAuthorityForGuest(); }
+  if(addAfter){ await openAddGuest(a.ID_AUTORIDADE); $('#agSearch').value=a.NOME_COMPLETO; await searchAuthorityForGuest(); }
   else if(state.screen==='autoridades') renderAutoridades();
   else if(state.screen==='evento') renderEvento();
 }

@@ -9,10 +9,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="SGCM">
   <title>SGCM | Sistema de Gerenciamento de Cerimonial Militar</title>
-  <link rel="manifest" href="manifest.webmanifest?v=20260809-06">
+  <link rel="manifest" href="manifest.webmanifest?v=20260809-08">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=20260809-06">
+  <link rel="stylesheet" href="styles.css?v=20260809-08">
 </head>
 <body>
 <div id="app" class="app-shell">
@@ -46,6 +46,7 @@
       <button data-nav-screen="nominata" onclick="navigate('nominata')">Nominata</button>
       <button data-nav-screen="estatisticas" onclick="navigate('estatisticas')">Estatísticas</button>
       <button data-nav-screen="documentos" onclick="navigate('documentos')">Gerar arquivos</button>
+      <button onclick="window.open('dashboard.html','_blank')">Dashboard</button>
       <button data-nav-screen="guia" onclick="navigate('guia')">Guia rápido</button>
     </aside>
 
@@ -81,6 +82,7 @@
   <button data-nav-screen="nominata" onclick="sideNavigate('nominata')">Nominata</button>
   <button data-nav-screen="estatisticas" onclick="sideNavigate('estatisticas')">Estatísticas</button>
   <button data-nav-screen="documentos" onclick="sideNavigate('documentos')">Gerar arquivos</button>
+  <button onclick="window.open('dashboard.html','_blank');toggleDrawer(false)">Dashboard</button>
   <button data-nav-screen="guia" onclick="sideNavigate('guia')">Guia rápido</button>
   <div class="drawer-version">Versão 2.0 - 2026</div>
 </aside>
@@ -90,11 +92,11 @@
 </div>
 <div id="toast" class="toast hidden"></div>
 
-<script src="config.js?v=20260809-06"></script>
-<script src="app.js?v=20260809-06"></script>
+<script src="config.js?v=20260809-08"></script>
+<script src="app.js?v=20260809-08"></script>
 <script>
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js?v=20260809-06', {updateViaCache:'none'}).catch(() => {}));
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js?v=20260809-08', {updateViaCache:'none'}).catch(() => {}));
   }
 </script>
 </body>

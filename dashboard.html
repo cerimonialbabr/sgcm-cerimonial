@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b2c66">
+  <title>SGCM | Dashboard</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="dashboard.css?v=20260809-08">
+</head>
+<body>
+  <main class="tv-shell">
+    <header class="tv-header">
+      <div class="tv-brand"><img src="assets/logo.png" onerror="this.src='assets/logo.svg'" alt="SGCM"><div><h1>Sistema de Gerenciamento de Cerimonial Militar</h1><div id="tvEvent">Carregando cerimônia...</div></div></div>
+      <div class="tv-clock"><div id="tvTime">--:--</div><small id="tvUpdated">Atualizando...</small></div>
+    </header>
+    <section class="tv-tribuna panel"><div class="panel-title">TRIBUNA DE HONRA</div><div id="tvTribuna" class="tv-tribuna-content"><div class="empty">Carregando...</div></div></section>
+    <section class="tv-bottom">
+      <div class="panel tv-nominata"><div class="panel-head"><div class="panel-title">NOMINATA</div><div id="tvNomTotals" class="mini-totals"></div></div><div id="tvNominata" class="tv-nominata-list"></div></div>
+      <div class="panel tv-stats"><div class="panel-title">ESTATÍSTICAS</div><div id="tvStats" class="tv-stats-grid"></div></div>
+    </section>
+  </main>
+  <script src="config.js?v=20260809-08"></script>
+  <script src="dashboard.js?v=20260809-08"></script>
+</body>
+</html>
