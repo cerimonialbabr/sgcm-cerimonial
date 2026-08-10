@@ -434,7 +434,13 @@
     injectFamilyStyles();
     const main=document.querySelector('#main');
     if(main){
-      new MutationObserver(()=>setTimeout(refreshFamilyCards,20)).observe(main,{childList:true,subtree:true});
+      new MutationObserver(()=>{
+        // A tela Gerar arquivos é redesenhada dinamicamente. Recoloca o botão
+        // sempre que essa tela é renderizada, sem alterar qualquer outra tela.
+        ensureFamilyDocButton();
+        setTimeout(refreshFamilyCards,20);
+      }).observe(main,{childList:true,subtree:true});
+      ensureFamilyDocButton();
       setTimeout(refreshFamilyCards,120);
     }
   }
