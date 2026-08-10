@@ -441,3 +441,77 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);
   else boot();
 })();
+
+/* ===== SGCM Performance Client 2026-08-10 =====
+ * Não altera layout nem regras. Apenas:
+ * - evita duas chamadas idênticas simultâneas;
+ * - reaproveita por poucos segundos leituras já recebidas;
+ * - limpa tudo imediatamente após qualquer escrita.
+ */
+(function(){
+  'use strict';
+  if(typeof window.server!=='function'||window.__SGCM_PERF_CLIENT__)return;
+  window.__SGCM_PERF_CLIENT__=true;
+
+  const originalServer=window.server;
+  const cache=new Map();
+  const inflight=new Map();
+  const READ_ACTIONS=new Set([
+    'apiBootstrap','apiListarCerimonias','apiListarConvidados','apiListarConvidadosResumo',
+    'apiObterConvidado','apiObterConvidadoResumo','apiListarAutoridades','apiListarAutoridadesPagina',
+    'apiObterAutoridade','apiListarFamiliares','apiObterTribuna','apiListarNominata','apiNominataPainel',
+    'apiListarMensagensNominata','apiEstatisticas','apiListarGruposEstatistica','apiOpcoesEstatistica',
+    'apiDashboard','apiFotoBase64','apiResultadoComando'
+  ]);
+  const TTL={
+    apiBootstrap:2500,
+    apiListarCerimonias:3000,
+    apiListarConvidados:1200,
+    apiListarConvidadosResumo:1200,
+    apiObterConvidado:1200,
+    apiObterConvidadoResumo:1200,
+    apiListarAutoridades:10000,
+    apiListarAutoridadesPagina:10000,
+    apiObterAutoridade:5000,
+    apiListarFamiliares:1200,
+    apiObterTribuna:1200,
+    apiListarNominata:1200,
+    apiNominataPainel:1200,
+    apiListarMensagensNominata:30000,
+    apiEstatisticas:1500,
+    apiListarGruposEstatistica:30000,
+    apiOpcoesEstatistica:5000
+  };
+
+  function key(action,args){
+    let a='';
+    try{a=JSON.stringify(args||[]);}catch(e){a=String(args||'');}
+    return action+'|'+a;
+  }
+  function clear(){cache.clear();}
+  window.sgcmLimparCacheLocal=clear;
+
+  window.server=function(action,...args){
+    const isRead=READ_ACTIONS.has(action);
+    const ttl=TTL[action]||0;
+    const k=key(action,args);
+    const now=Date.now();
+
+    if(isRead&&ttl){
+      const hit=cache.get(k);
+      if(hit&&now-hit.at<ttl)return Promise.resolve(hit.value);
+      if(inflight.has(k))return inflight.get(k);
+      const p=Promise.resolve(originalServer(action,...args))
+        .then(value=>{cache.set(k,{at:Date.now(),value});return value;})
+        .finally(()=>inflight.delete(k));
+      inflight.set(k,p);
+      return p;
+    }
+
+    // apiResultadoComando e fotos não são persistidos no cliente.
+    if(isRead)return originalServer(action,...args);
+
+    // Depois de qualquer gravação, nenhuma leitura antiga pode sobreviver.
+    return Promise.resolve(originalServer(action,...args)).then(value=>{clear();return value;});
+  };
+})();
