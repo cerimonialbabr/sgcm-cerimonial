@@ -1,4 +1,4 @@
-/* SGCM 2.0 - Familiares/Nominata - revisão 2026-08-10-02
+/* SGCM 2.0 - Familiares/Nominata - revisão 2026-08-10-03
  * Carregar DEPOIS de app.js.
  *
  * Ajustes desta revisão:
@@ -6,10 +6,137 @@
  * 2) ESPOSA/ESPOSO nas novas inclusões;
  * 3) clique confiável no CARTÃO do familiar na Nominata para
  *    confirmar/cancelar presença;
- * 4) mantém o botão GERAR NOMINATA COM FAMILIARES.
+ * 4) mantém o botão GERAR NOMINATA COM FAMILIARES;
+ * 5) padroniza visualmente o cartão e o modal do familiar na Nominata.
  */
 (function(){
   'use strict';
+
+
+  /* ---------- Ajuste visual do familiar na Nominata ---------- */
+  function injectFamilyStyles(){
+    if(document.querySelector('#sgcm-family-style'))return;
+    const st=document.createElement('style');
+    st.id='sgcm-family-style';
+    st.textContent=`
+      .sgcm-family-card{cursor:pointer}
+      .sgcm-family-card .sgcm-family-title{
+        font-weight:800!important;
+        line-height:1.22!important;
+        color:var(--text,#17243a)!important;
+        letter-spacing:0!important;
+      }
+      .sgcm-family-card .sgcm-family-meta-row{
+        display:flex!important;
+        align-items:center!important;
+        gap:7px!important;
+        flex-wrap:nowrap!important;
+        margin-top:4px!important;
+      }
+      .sgcm-family-card .sgcm-family-presence-badge{
+        display:inline-flex!important;
+        align-items:center!important;
+        justify-content:center!important;
+        margin:0!important;
+        padding:3px 8px!important;
+        border-radius:999px!important;
+        font-size:10px!important;
+        font-weight:800!important;
+        line-height:1!important;
+        white-space:nowrap!important;
+        letter-spacing:0!important;
+      }
+      .sgcm-family-modal-title{
+        margin:0 72px 16px 0!important;
+        font-size:22px!important;
+        line-height:1.2!important;
+        color:var(--text,#17243a)!important;
+      }
+      .sgcm-family-related{
+        margin:0 0 14px!important;
+        padding:11px 13px!important;
+        border:1px solid #ead48c!important;
+        border-radius:10px!important;
+        background:#fff8df!important;
+      }
+      .sgcm-family-related-label{
+        display:block!important;
+        margin-bottom:3px!important;
+        font-size:11px!important;
+        font-weight:700!important;
+        color:#7a5a00!important;
+      }
+      .sgcm-family-related-value{
+        display:block!important;
+        font-size:13px!important;
+        font-weight:700!important;
+        line-height:1.3!important;
+        color:#493900!important;
+      }
+      .sgcm-family-modal-fields{
+        display:grid!important;
+        grid-template-columns:repeat(3,minmax(0,1fr))!important;
+        gap:10px!important;
+        margin:0 0 16px!important;
+      }
+      .sgcm-family-field{
+        min-width:0!important;
+        padding:10px 12px!important;
+        border:1px solid var(--line,#d5deea)!important;
+        border-radius:9px!important;
+        background:#f8fafc!important;
+      }
+      .sgcm-family-field-label{
+        display:block!important;
+        margin-bottom:4px!important;
+        font-size:10px!important;
+        font-weight:700!important;
+        color:var(--muted,#68758a)!important;
+        text-transform:uppercase!important;
+        letter-spacing:.03em!important;
+      }
+      .sgcm-family-field-value{
+        display:block!important;
+        font-size:13px!important;
+        font-weight:800!important;
+        line-height:1.25!important;
+        color:var(--text,#17243a)!important;
+        overflow-wrap:anywhere!important;
+      }
+      .sgcm-family-modal-action{
+        width:100%!important;
+        min-height:42px!important;
+        margin-top:2px!important;
+      }
+      @media(max-width:700px){
+        .sgcm-family-modal-title{
+          margin-right:58px!important;
+          font-size:18px!important;
+          line-height:1.25!important;
+        }
+        .sgcm-family-modal-fields{
+          grid-template-columns:1fr!important;
+          gap:7px!important;
+        }
+        .sgcm-family-field{
+          display:grid!important;
+          grid-template-columns:88px minmax(0,1fr)!important;
+          align-items:center!important;
+          gap:8px!important;
+          padding:9px 10px!important;
+        }
+        .sgcm-family-field-label{margin:0!important}
+        .sgcm-family-field-value{text-align:left!important}
+        .sgcm-family-card .sgcm-family-meta-row{gap:5px!important}
+        .sgcm-family-card .sgcm-family-presence-badge{font-size:9px!important;padding:3px 7px!important}
+      }
+      @media(max-width:390px){
+        .sgcm-family-field{grid-template-columns:76px minmax(0,1fr)!important}
+        .sgcm-family-modal-title{font-size:17px!important}
+      }
+    `;
+    document.head.appendChild(st);
+  }
 
   function norm(s){
     return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
@@ -159,17 +286,30 @@
     return null;
   }
 
-  function badgePresenca(card,presente){
+  function marcarTituloFamiliar_(card,f){
+    if(!card||!f)return;
+    card.classList.add('sgcm-family-card');
+    const alvo=norm(f.NOME||'');
+    if(alvo){
+      const candidatos=[...card.querySelectorAll('div,span,strong,p')]
+        .filter(el=>!el.children.length&&norm(el.textContent).includes(alvo));
+      if(candidatos.length){
+        candidatos.sort((a,b)=>(a.textContent||'').length-(b.textContent||'').length);
+        candidatos[0].classList.add('sgcm-family-title');
+      }
+    }
+  }
+
+  function badgePresenca(card,presente,f){
     if(!card)return;
+    marcarTituloFamiliar_(card,f);
     let badge=card.querySelector('.sgcm-family-presence-badge');
+    const candidates=[...card.querySelectorAll('span,div')];
+    const famTag=candidates.find(x=>norm(x.textContent)==='FAMILIAR');
+    if(famTag&&famTag.parentElement)famTag.parentElement.classList.add('sgcm-family-meta-row');
     if(!badge){
       badge=document.createElement('span');
       badge.className='sgcm-family-presence-badge';
-      badge.style.cssText='display:inline-flex;align-items:center;margin-left:7px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:800;line-height:1;white-space:nowrap;';
-
-      // Insere ao lado da etiqueta FAMILIAR quando possível.
-      const candidates=[...card.querySelectorAll('span,div')];
-      const famTag=candidates.find(x=>norm(x.textContent)==='FAMILIAR');
       if(famTag&&famTag.parentElement)famTag.insertAdjacentElement('afterend',badge);
       else{
         const rem=[...card.querySelectorAll('button')].find(b=>norm(b.textContent)==='REMOVER');
@@ -191,20 +331,23 @@
     }
     const presente=!!(it&&typeof it.PRESENTE==='boolean'?it.PRESENTE:f.PRESENCA);
     const rel=String(f.AUTORIDADE_RESUMO||f.AUTORIDADE||'').toUpperCase();
-    const titulo=[String(f.NOME||'').toUpperCase(),String(f.VINCULO||'').toUpperCase()].filter(Boolean).join(' — ');
+    const nome=String(f.NOME||'').toUpperCase();
+    const vinculo=String(f.VINCULO||'').toUpperCase();
+    const titulo=[nome,vinculo].filter(Boolean).join(' — ');
     const acao=presente?'CANCELAR PRESENÇA':'CONFIRMAR PRESENÇA';
     const cls=presente?'danger':'success';
     const fechar=(typeof modalCloseButton==='function')?modalCloseButton():'<button class="btn outline" onclick="closeModal()">FECHAR</button>';
-    const html=`${fechar}<h2>${esc(titulo)}</h2>
-      ${rel?`<div class="notice"><strong>Relacionado a:</strong><br>${esc(rel)}</div>`:''}
-      <div class="detail-grid" style="margin-top:12px">
-        <div><span class="muted small">Nome</span><strong>${esc(String(f.NOME||'').toUpperCase())}</strong></div>
-        <div><span class="muted small">Vínculo</span><strong>${esc(String(f.VINCULO||'').toUpperCase())}</strong></div>
-        <div><span class="muted small">Presença</span><strong>${presente?'PRESENTE':'PENDENTE'}</strong></div>
+    const html=`${fechar}<h2 class="sgcm-family-modal-title">${esc(titulo)}</h2>
+      ${rel?`<div class="sgcm-family-related"><span class="sgcm-family-related-label">Relacionado a</span><span class="sgcm-family-related-value">${esc(rel)}</span></div>`:''}
+      <div class="sgcm-family-modal-fields">
+        <div class="sgcm-family-field"><span class="sgcm-family-field-label">Nome</span><span class="sgcm-family-field-value">${esc(nome)}</span></div>
+        <div class="sgcm-family-field"><span class="sgcm-family-field-label">Vínculo</span><span class="sgcm-family-field-value">${esc(vinculo)}</span></div>
+        <div class="sgcm-family-field"><span class="sgcm-family-field-label">Presença</span><span class="sgcm-family-field-value">${presente?'PRESENTE':'PENDENTE'}</span></div>
       </div>
-      <button class="btn ${cls} block" style="margin-top:16px" onclick="toggleNomFamilyPresence('${esc(id)}',${presente?'true':'false'})">${acao}</button>`;
+      <button class="btn ${cls} block sgcm-family-modal-action" onclick="toggleNomFamilyPresence('${esc(id)}',${presente?'true':'false'})">${acao}</button>`;
     if(typeof openModal==='function')openModal(html,true);
   }
+
   window.openNomFamilyPresence=familyPresenceModal;
 
   async function toggleNomFamilyPresence(id,presente){
@@ -259,7 +402,7 @@
         card.setAttribute('role','button');
         card.setAttribute('tabindex','0');
         card.setAttribute('title','Clique para confirmar ou cancelar a presença do familiar');
-        badgePresenca(card,presente);
+        badgePresenca(card,presente,f);
       });
     }catch(e){console.warn('SGCM cartões familiares:',e);}
   }
@@ -288,6 +431,7 @@
   },true);
 
   function boot(){
+    injectFamilyStyles();
     const main=document.querySelector('#main');
     if(main){
       new MutationObserver(()=>setTimeout(refreshFamilyCards,20)).observe(main,{childList:true,subtree:true});
