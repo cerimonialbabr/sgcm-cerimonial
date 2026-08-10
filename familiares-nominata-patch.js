@@ -83,7 +83,11 @@
     }catch(e){console.warn('SGCM botão nominata familiares:',e);}
   }
 
-  /* ---------- Presença do familiar na Nominata ---------- */
+  /* ---------- Presença do familiar na Nominata ----------
+   * Revisão final: não depende mais de "achar" previamente um cartão e
+   * instalar onclick nele. O clique é tratado por delegação no documento,
+   * então continua funcionando mesmo quando a Nominata é redesenhada.
+   */
   function painel(){
     return (typeof state!=='undefined'&&state.nomData)?state.nomData:{};
   }
@@ -96,17 +100,86 @@
     return (painel().items||[]).find(it=>norm(it.TIPO_ITEM)==='FAMILIAR'&&String(it.REF)===String(id))||null;
   }
 
+  async function carregarPainelNominata(){
+    const c=(typeof contextCeremony==='function')?contextCeremony():null;
+    if(!c)return null;
+    try{
+      const d=await server('apiNominataPainel',c.ID_CERIMONIA);
+      if(typeof state!=='undefined')state.nomData=d;
+      return d;
+    }catch(e){
+      console.warn('SGCM painel nominata:',e);
+      return null;
+    }
+  }
+
   async function familyById(id){
     let f=familyByIdLocal(id);
     if(f)return f;
-    try{
-      const c=(typeof contextCeremony==='function')?contextCeremony():null;
-      if(!c)return null;
-      const fams=await server('apiListarFamiliares',c.ID_CERIMONIA,'TODOS');
-      f=(fams||[]).find(x=>String(x.ID_FAMILIAR)===String(id))||null;
-      if(typeof state!=='undefined'&&state.nomData&&Array.isArray(fams))state.nomData.fams=fams;
-      return f;
-    }catch(e){console.warn('SGCM carregar familiar:',e);return null;}
+    const d=await carregarPainelNominata();
+    return d?(d.fams||[]).find(x=>String(x.ID_FAMILIAR)===String(id))||null:null;
+  }
+
+  function familyItemForCard(card,d){
+    d=d||painel();
+    const txt=norm(card&&card.innerText);
+    const famItems=(d.items||[]).filter(it=>norm(it.TIPO_ITEM)==='FAMILIAR');
+    const fams=d.fams||[];
+
+    // Primeiro pelo nome do familiar mostrado no cartão.
+    let achados=famItems.filter(it=>{
+      const f=fams.find(x=>String(x.ID_FAMILIAR)===String(it.REF));
+      return f&&norm(f.NOME)&&txt.includes(norm(f.NOME));
+    });
+    if(achados.length===1)return achados[0];
+
+    // Depois pelo título que o backend já montou para o item da Nominata.
+    achados=famItems.filter(it=>norm(it.TITULO)&&txt.includes(norm(it.TITULO)));
+    if(achados.length===1)return achados[0];
+
+    // Se houver apenas um familiar na Nominata, não há ambiguidade.
+    return famItems.length===1?famItems[0]:null;
+  }
+
+  function removeButtonsCount(el){
+    return [...el.querySelectorAll('button')].filter(b=>norm(b.textContent)==='REMOVER').length;
+  }
+
+  function closestFamilyCard(target){
+    const main=document.querySelector('#main');
+    if(!main||!target)return null;
+    let el=target.nodeType===1?target:target.parentElement;
+    while(el&&el!==main){
+      const txt=norm(el.innerText||'');
+      // O cartão é o primeiro ancestral que contém exatamente um REMOVER e
+      // a etiqueta FAMILIAR. Isso evita selecionar o painel inteiro.
+      if(txt.includes('FAMILIAR')&&removeButtonsCount(el)===1)return el;
+      el=el.parentElement;
+    }
+    return null;
+  }
+
+  function badgePresenca(card,presente){
+    if(!card)return;
+    let badge=card.querySelector('.sgcm-family-presence-badge');
+    if(!badge){
+      badge=document.createElement('span');
+      badge.className='sgcm-family-presence-badge';
+      badge.style.cssText='display:inline-flex;align-items:center;margin-left:7px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:800;line-height:1;white-space:nowrap;';
+
+      // Insere ao lado da etiqueta FAMILIAR quando possível.
+      const candidates=[...card.querySelectorAll('span,div')];
+      const famTag=candidates.find(x=>norm(x.textContent)==='FAMILIAR');
+      if(famTag&&famTag.parentElement)famTag.insertAdjacentElement('afterend',badge);
+      else{
+        const rem=[...card.querySelectorAll('button')].find(b=>norm(b.textContent)==='REMOVER');
+        if(rem&&rem.parentElement)rem.parentElement.insertBefore(badge,rem);
+        else card.appendChild(badge);
+      }
+    }
+    badge.textContent=presente?'PRESENTE':'PENDENTE';
+    badge.style.background=presente?'#dff4e8':'#fff1c9';
+    badge.style.color=presente?'#176b45':'#8a5b00';
   }
 
   async function familyPresenceModal(id){
@@ -127,7 +200,7 @@
       <div class="detail-grid" style="margin-top:12px">
         <div><span class="muted small">Nome</span><strong>${esc(String(f.NOME||'').toUpperCase())}</strong></div>
         <div><span class="muted small">Vínculo</span><strong>${esc(String(f.VINCULO||'').toUpperCase())}</strong></div>
-        <div><span class="muted small">Status</span><strong>${presente?'PRESENTE':'SEM PRESENÇA'}</strong></div>
+        <div><span class="muted small">Presença</span><strong>${presente?'PRESENTE':'PENDENTE'}</strong></div>
       </div>
       <button class="btn ${cls} block" style="margin-top:16px" onclick="toggleNomFamilyPresence('${esc(id)}',${presente?'true':'false'})">${acao}</button>`;
     if(typeof openModal==='function')openModal(html,true);
@@ -142,8 +215,11 @@
       else await server('apiMarcarPresencaFamiliar',c.ID_CERIMONIA,id);
       if(typeof closeModal==='function')closeModal();
       if(typeof showToast==='function')showToast(presente?'Presença do familiar cancelada.':'Presença do familiar confirmada.');
+
+      // Atualiza o painel a partir do backend e redesenha a Nominata.
+      await carregarPainelNominata();
       if(typeof renderNominata==='function')await renderNominata();
-      setTimeout(enhanceFamilyCards,80);
+      setTimeout(refreshFamilyCards,80);
     }catch(e){
       if(typeof showToast==='function')showToast(e.message||String(e));
       else alert(e.message||String(e));
@@ -151,90 +227,71 @@
   }
   window.toggleNomFamilyPresence=toggleNomFamilyPresence;
 
-  function candidateCards(main){
-    // Cada cartão da Nominata possui o botão REMOVER. Usar esse botão como
-    // âncora é mais confiável do que depender de nomes de classes do app.
-    const buttons=[...main.querySelectorAll('button')].filter(b=>norm(b.textContent)==='REMOVER');
-    const cards=[];
-    buttons.forEach(btn=>{
-      let el=btn.parentElement,best=null;
-      for(let i=0;el&&el!==main&&i<7;i++,el=el.parentElement){
-        const t=norm(el.innerText||'');
-        if(t&&t.includes('REMOVER'))best=el;
-      }
-      if(best&&!cards.includes(best))cards.push(best);
-    });
-    return cards;
+  async function resolveItemForCard(card){
+    let d=painel();
+    let it=familyItemForCard(card,d);
+    if(it)return it;
+    d=await carregarPainelNominata()||{};
+    return familyItemForCard(card,d);
   }
 
-  function matchFamilyCard(cards,it,f){
-    const titulo=norm(it&&it.TITULO);
-    const nome=norm(f&&f.NOME);
-    let candidates=cards.filter(c=>{
-      const t=norm(c.innerText||'');
-      return (titulo&&t.includes(titulo)) || (nome&&t.includes(nome)&&t.includes('FAMILIAR'));
-    });
-    if(!candidates.length&&nome)candidates=cards.filter(c=>norm(c.innerText||'').includes(nome));
-    candidates.sort((a,b)=>(a.innerText||'').length-(b.innerText||'').length);
-    return candidates[0]||null;
-  }
-
-  function enhanceFamilyCards(){
+  async function refreshFamilyCards(){
     try{
       const main=document.querySelector('#main');
       if(!main||!/NOMINATA/i.test(main.textContent||''))return;
-      const d=painel();
-      const famItems=(d.items||[]).filter(it=>norm(it.TIPO_ITEM)==='FAMILIAR');
-      if(!famItems.length)return;
-      const cards=candidateCards(main);
-      famItems.forEach(it=>{
-        const f=(d.fams||[]).find(x=>String(x.ID_FAMILIAR)===String(it.REF))||null;
-        const card=matchFamilyCard(cards,it,f);
-        if(!card||card.dataset.sgcmFamilyPresence===String(it.REF))return;
-        card.dataset.sgcmFamilyPresence=String(it.REF);
+      let d=painel();
+      if(!(d.items||[]).length)d=await carregarPainelNominata()||{};
+
+      const removeBtns=[...main.querySelectorAll('button')].filter(b=>norm(b.textContent)==='REMOVER');
+      const cards=[];
+      removeBtns.forEach(btn=>{
+        const c=closestFamilyCard(btn.parentElement||btn);
+        if(c&&!cards.includes(c))cards.push(c);
+      });
+
+      cards.forEach(card=>{
+        const it=familyItemForCard(card,d);
+        if(!it)return;
+        const f=(d.fams||[]).find(x=>String(x.ID_FAMILIAR)===String(it.REF));
+        const presente=!!(typeof it.PRESENTE==='boolean'?it.PRESENTE:(f&&f.PRESENCA));
+        card.dataset.sgcmFamilyId=String(it.REF);
         card.style.cursor='pointer';
         card.setAttribute('role','button');
         card.setAttribute('tabindex','0');
         card.setAttribute('title','Clique para confirmar ou cancelar a presença do familiar');
-
-        const handler=ev=>{
-          // REMOVER e demais controles do cartão continuam funcionando.
-          if(ev.target&&ev.target.closest&&ev.target.closest('button,a,input,select,textarea,label'))return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          familyPresenceModal(it.REF);
-        };
-        // Capture=true evita que algum onclick do cartão/pai impeça o clique.
-        card.addEventListener('click',handler,true);
-        card.addEventListener('keydown',ev=>{
-          if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();familyPresenceModal(it.REF);}
-        });
+        badgePresenca(card,presente);
       });
-    }catch(e){console.warn('SGCM presença familiar na nominata:',e);}
+    }catch(e){console.warn('SGCM cartões familiares:',e);}
   }
 
-  // Reaplica após toda renderização da Nominata.
-  if(typeof renderNominata==='function'){
-    const originalRenderNominata=renderNominata;
-    renderNominata=async function(){
-      const r=await originalRenderNominata.apply(this,arguments);
-      setTimeout(enhanceFamilyCards,40);
-      return r;
-    };
-    window.renderNominata=renderNominata;
-  }
+  // Delegação global: funciona mesmo depois que renderNominata substitui todo
+  // o HTML dos cartões. O botão REMOVER continua independente.
+  document.addEventListener('click',async ev=>{
+    if(ev.target&&ev.target.closest&&ev.target.closest('button,a,input,select,textarea,label'))return;
+    const card=closestFamilyCard(ev.target);
+    if(!card)return;
+    const it=card.dataset.sgcmFamilyId?{REF:card.dataset.sgcmFamilyId}:await resolveItemForCard(card);
+    if(!it||!it.REF)return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    familyPresenceModal(it.REF);
+  },true);
+
+  document.addEventListener('keydown',async ev=>{
+    if(ev.key!=='Enter'&&ev.key!==' ')return;
+    const card=closestFamilyCard(ev.target);
+    if(!card)return;
+    const it=card.dataset.sgcmFamilyId?{REF:card.dataset.sgcmFamilyId}:await resolveItemForCard(card);
+    if(!it||!it.REF)return;
+    ev.preventDefault();
+    familyPresenceModal(it.REF);
+  },true);
 
   function boot(){
     const main=document.querySelector('#main');
     if(main){
-      new MutationObserver(()=>{
-        ensureFamilyDocButton();
-        setTimeout(enhanceFamilyCards,20);
-      }).observe(main,{childList:true,subtree:true});
-      ensureFamilyDocButton();
-      setTimeout(enhanceFamilyCards,100);
-      // Fallback leve: cobre navegadores que não disparam mutação na troca de tela.
-      setInterval(enhanceFamilyCards,1200);
+      new MutationObserver(()=>setTimeout(refreshFamilyCards,20)).observe(main,{childList:true,subtree:true});
+      setTimeout(refreshFamilyCards,120);
     }
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);
