@@ -280,3 +280,27 @@ button{cursor:pointer}
   .page-actions.nominata-actions .btn{font-size:8.2px;padding-left:5px;padding-right:5px;min-height:38px}
   .page-head.mobile-inline-head .page-actions.single .btn{font-size:9px;padding-left:10px;padding-right:10px;min-height:38px}
 }
+
+/* ===== SGCM 2.1 — Familiar na Nominata ===== */
+.sgcm-family-card{cursor:pointer}
+.sgcm-family-card .person-name{font-weight:800;line-height:1.22;color:var(--text,#17243a);letter-spacing:0}
+.sgcm-family-modal-title{margin:0 72px 16px 0;font-size:22px;line-height:1.2;color:var(--text,#17243a)}
+.sgcm-family-related{margin:0 0 14px;padding:11px 13px;border:1px solid #ead48c;border-radius:10px;background:#fff8df}
+.sgcm-family-related-label{display:block;margin-bottom:3px;font-size:11px;font-weight:700;color:#7a5a00}
+.sgcm-family-related-value{display:block;font-size:13px;font-weight:700;line-height:1.3;color:#493900}
+.sgcm-family-modal-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 16px}
+.sgcm-family-field{min-width:0;padding:10px 12px;border:1px solid var(--line,#d5deea);border-radius:9px;background:#f8fafc}
+.sgcm-family-field-label{display:block;margin-bottom:4px;font-size:10px;font-weight:700;color:var(--muted,#68758a);text-transform:uppercase;letter-spacing:.03em}
+.sgcm-family-field-value{display:block;font-size:13px;font-weight:800;line-height:1.25;color:var(--text,#17243a);overflow-wrap:anywhere}
+.sgcm-family-modal-action{width:100%;min-height:42px;margin-top:2px}
+@media(max-width:700px){
+  .sgcm-family-modal-title{margin-right:58px;font-size:18px;line-height:1.25}
+  .sgcm-family-modal-fields{grid-template-columns:1fr;gap:7px}
+  .sgcm-family-field{display:grid;grid-template-columns:88px minmax(0,1fr);align-items:center;gap:8px;padding:9px 10px}
+  .sgcm-family-field-label{margin:0}
+  .sgcm-family-field-value{text-align:left}
+}
+@media(max-width:390px){
+  .sgcm-family-field{grid-template-columns:76px minmax(0,1fr)}
+  .sgcm-family-modal-title{font-size:17px}
+}

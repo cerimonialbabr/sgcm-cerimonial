@@ -9,16 +9,16 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="SGCM">
   <title>SGCM | Sistema de Gerenciamento de Cerimonial Militar</title>
-  <link rel="manifest" href="manifest.webmanifest?v=20260809-10">
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest?v=20260812-01">
+  <link rel="icon" href="assets/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=20260809-10">
+  <link rel="stylesheet" href="styles.css?v=20260812-01">
 </head>
 <body>
 <div id="app" class="app-shell">
   <header class="topbar">
     <div class="brand">
-      <img class="brand-logo" src="assets/logo.png" onerror="this.onerror=null;this.src='assets/logo.svg'" alt="Logo SGCM">
+      <img class="brand-logo" src="assets/logo.png" onerror="this.onerror=null;this.src='assets/icon-192.png'" alt="Logo SGCM">
       <div class="brand-copy">
         <div class="brand-name">Sistema de Gerenciamento de Cerimonial Militar</div>
         <div class="brand-meta"><span class="brand-acronym">SGCM</span><span id="headerContext">Carregando...</span></div>
@@ -63,7 +63,7 @@
   <footer class="app-footer">
     <div>Desenvolvido por Maj Av Ranyer</div>
     <div>Seção de Cerimonial Militar da Base Aérea de Brasília</div>
-    <div>Versão 2.0 - 2026</div>
+    <div>Versão 2.1 - 2026</div>
   </footer>
 </div>
 
@@ -71,7 +71,7 @@
 <aside id="drawer" class="drawer">
   <div class="drawer-head">
     <div class="drawer-brand">
-      <img src="assets/logo.png" onerror="this.onerror=null;this.src='assets/logo.svg'" alt="Logo SGCM">
+      <img src="assets/logo.png" onerror="this.onerror=null;this.src='assets/icon-192.png'" alt="Logo SGCM">
       <div><strong>SGCM</strong><small>Sistema de Gerenciamento de Cerimonial Militar</small></div>
     </div>
     <button class="close-btn" onclick="toggleDrawer(false)">Fechar</button>
@@ -84,7 +84,7 @@
   <button data-nav-screen="documentos" onclick="sideNavigate('documentos')">Gerar arquivos</button>
   <button onclick="window.open('dashboard.html','_blank');toggleDrawer(false)">Dashboard</button>
   <button data-nav-screen="guia" onclick="sideNavigate('guia')">Guia rápido</button>
-  <div class="drawer-version">Versão 2.0 - 2026</div>
+  <div class="drawer-version">Versão 2.1 - 2026</div>
 </aside>
 
 <div id="modalBackdrop" class="modal-backdrop hidden" onclick="closeModal(event)">
@@ -92,12 +92,11 @@
 </div>
 <div id="toast" class="toast hidden"></div>
 
-<script src="config.js?v=20260809-10"></script>
-<script src="app.js?v=20260809-10"></script>
-<script src="familiares-nominata-patch.js?v=20260810-01"></script>
+<script src="config.js?v=20260812-01"></script>
+<script src="app.js?v=20260812-01"></script>
 <script>
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js?v=20260809-10', {updateViaCache:'none'}).catch(() => {}));
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js?v=20260812-01', {updateViaCache:'none'}).catch(() => {}));
   }
 </script>
 </body>
