@@ -281,7 +281,7 @@ button{cursor:pointer}
   .page-head.mobile-inline-head .page-actions.single .btn{font-size:9px;padding-left:10px;padding-right:10px;min-height:38px}
 }
 
-/* ===== SGCM 2.1 — Familiar na Nominata ===== */
+/* ===== SGCM 2.2 — Familiar na Nominata ===== */
 .sgcm-family-card{cursor:pointer}
 .sgcm-family-card .person-name{font-weight:800;line-height:1.22;color:var(--text,#17243a);letter-spacing:0}
 .sgcm-family-modal-title{margin:0 72px 16px 0;font-size:22px;line-height:1.2;color:var(--text,#17243a)}

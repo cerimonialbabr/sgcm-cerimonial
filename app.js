@@ -9,13 +9,14 @@ const state = {
   nomData: null,
   nomItems: [],
   statsConfig: null,
-  addGuestSelectedAuthority: null
+  addGuestSelectedAuthority: null,
+  operation: { idCer:'', versao:'0', convidados:[], familiares:[], atualizadoEm:'', ready:false }
 };
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 
-const CACHE_PREFIX='SGCM21_';
+const CACHE_PREFIX='SGCM22_';
 function cacheSet(key,value){
   try{localStorage.setItem(CACHE_PREFIX+key,JSON.stringify({at:Date.now(),value}));}catch(e){}
 }
@@ -30,7 +31,7 @@ function cacheGet(key,maxAgeMs=12*60*60*1000){
 function cacheRemove(key){try{localStorage.removeItem(CACHE_PREFIX+key)}catch(e){}}
 function ceremonyCacheKey(kind,id){return kind+'_'+String(id||'');}
 const SGCM_READ_ACTIONS = new Set([
-  'apiBootstrap','apiListarCerimonias','apiListarConvidados','apiListarConvidadosResumo',
+  'apiBootstrap','apiOperacaoSnapshot','apiListarCerimonias','apiListarConvidados','apiListarConvidadosResumo',
   'apiObterConvidado','apiObterConvidadoResumo','apiListarAutoridades','apiListarAutoridadesPagina',
   'apiObterAutoridade','apiListarFamiliares','apiObterTribuna','apiListarNominata','apiNominataPainel',
   'apiListarMensagensNominata','apiEstatisticas','apiListarGruposEstatistica',
@@ -42,6 +43,17 @@ function apiUrl(){
   if(!u || u.includes('COLE_AQUI')) throw new Error('Configure a URL do Apps Script em config.js.');
   return u;
 }
+
+let __sgcmBridge=null;
+async function initBridgeTransport(timeoutMs=2200){
+  try{
+    if(typeof window.SGCMBridgeClient!=='function')return false;
+    if(!__sgcmBridge)__sgcmBridge=new window.SGCMBridgeClient(apiUrl(),{origin:location.origin});
+    return await __sgcmBridge.waitReady(timeoutMs);
+  }catch(e){console.warn('SGCM bridge indisponível; usando contingência HTTP.',e);return false;}
+}
+function bridgeReady(){return !!(__sgcmBridge&&__sgcmBridge.ready);}
+
 
 function jsonp(fn,args=[]){
   return new Promise((resolve,reject)=>{
@@ -83,7 +95,14 @@ async function writeCommand(fn,args=[]){
   throw new Error('A operação foi enviada, mas o resultado não foi confirmado a tempo. Atualize a tela para conferir.');
 }
 
-function server(fn,...args){ return SGCM_READ_ACTIONS.has(fn) ? jsonp(fn,args) : writeCommand(fn,args); }
+function server(fn,...args){
+  if(bridgeReady()){
+    // Uma chamada direta pelo bridge. Escritas nunca são repetidas
+    // automaticamente; assim não há risco de duplicar uma ação operacional.
+    return __sgcmBridge.request(fn,args,SGCM_READ_ACTIONS.has(fn)?25000:45000);
+  }
+  return SGCM_READ_ACTIONS.has(fn) ? jsonp(fn,args) : writeCommand(fn,args);
+}
 function showToast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),2600); }
 function openModal(html,wide=false){ $('#modal').classList.toggle('modal-wide',!!wide); $('#modal').innerHTML=html; $('#modalBackdrop').classList.remove('hidden'); }
 function closeModal(e){ if(e && e.target!==$('#modalBackdrop'))return; $('#modalBackdrop').classList.add('hidden'); $('#modal').classList.remove('modal-wide'); $('#modal').innerHTML=''; }
@@ -92,6 +111,78 @@ function toggleDrawer(on){ $('#drawer').classList.toggle('open',on); $('#drawerB
 function sideNavigate(s){ toggleDrawer(false); navigate(s); }
 function activeCeremony(){ return state.bootstrap && state.bootstrap.ativa; }
 function contextCeremony(){ return activeCeremony(); }
+
+function operacaoAtual(){return state.operation||{idCer:'',versao:'0',convidados:[],familiares:[],ready:false};}
+function convidadosOperacao(){const c=contextCeremony(),o=operacaoAtual();return c&&o.idCer===String(c.ID_CERIMONIA)?(o.convidados||[]):[];}
+function familiaresOperacao(){const c=contextCeremony(),o=operacaoAtual();return c&&o.idCer===String(c.ID_CERIMONIA)?(o.familiares||[]):[];}
+function convidadoOperacaoPorId(id){return convidadosOperacao().find(g=>String(g.ID_CONVIDADO)===String(id))||null;}
+function familiarOperacaoPorId(id){return familiaresOperacao().find(f=>String(f.ID_FAMILIAR)===String(id))||null;}
+
+function aplicarSnapshotOperacional(snap,fromCache=false){
+  if(!snap)return false;
+  if(snap.bootstrap)state.bootstrap=snap.bootstrap;
+  state.operation={
+    idCer:String(snap.idCer||''),versao:String(snap.versao||'0'),
+    convidados:Array.isArray(snap.convidados)?snap.convidados:[],
+    familiares:Array.isArray(snap.familiares)?snap.familiares:[],
+    atualizadoEm:snap.atualizadoEm||'',ready:true,fromCache:!!fromCache
+  };
+  state.eventGuests=state.operation.convidados;
+  updateHeader();
+  return true;
+}
+
+function salvarSnapshotOperacional(snap){
+  try{localStorage.setItem(CACHE_PREFIX+'operation_snapshot',JSON.stringify({at:Date.now(),value:snap}));}catch(e){}
+}
+function carregarSnapshotOperacionalCache(maxAgeMs=24*60*60*1000){
+  try{
+    const raw=localStorage.getItem(CACHE_PREFIX+'operation_snapshot');if(!raw)return null;
+    const obj=JSON.parse(raw);if(!obj||!obj.at||Date.now()-obj.at>maxAgeMs)return null;
+    return obj.value||null;
+  }catch(e){return null;}
+}
+
+async function reloadOperationalSnapshot(options={}){
+  const silent=!!options.silent;
+  try{
+    const snap=await server('apiOperacaoSnapshot');
+    aplicarSnapshotOperacional(snap,false);salvarSnapshotOperacional(snap);cacheSet('bootstrap',state.bootstrap);
+    return snap;
+  }catch(e){
+    const cached=carregarSnapshotOperacionalCache();
+    if(cached){
+      aplicarSnapshotOperacional(cached,true);
+      if(!silent)showToast('Sem resposta do backend. Exibindo a última sincronização operacional.');
+      return cached;
+    }
+    throw e;
+  }
+}
+
+function atualizarConvidadoLocal(id,patch){
+  const o=operacaoAtual(),idx=(o.convidados||[]).findIndex(g=>String(g.ID_CONVIDADO)===String(id));
+  if(idx<0)return null;
+  o.convidados[idx]=Object.assign({},o.convidados[idx],patch||{});
+  state.eventGuests=o.convidados;
+  salvarSnapshotOperacional({bootstrap:state.bootstrap,idCer:o.idCer,versao:o.versao,convidados:o.convidados,familiares:o.familiares,atualizadoEm:new Date().toISOString()});
+  return o.convidados[idx];
+}
+function atualizarFamiliarLocal(id,patch){
+  const o=operacaoAtual(),idx=(o.familiares||[]).findIndex(f=>String(f.ID_FAMILIAR)===String(id));
+  if(idx<0)return null;
+  o.familiares[idx]=Object.assign({},o.familiares[idx],patch||{});
+  salvarSnapshotOperacional({bootstrap:state.bootstrap,idCer:o.idCer,versao:o.versao,convidados:o.convidados,familiares:o.familiares,atualizadoEm:new Date().toISOString()});
+  return o.familiares[idx];
+}
+
+function filtroOperacao(tipo){
+  const list=convidadosOperacao();
+  if(tipo==='RECEPCAO')return list.filter(g=>!g.PRESENCA&&(g.STATUS_CONFIRMACAO==='CONFIRMADO'||g.STATUS_CONFIRMACAO==='PENDENTE'));
+  if(tipo==='PRESENTES')return list.filter(g=>!!g.PRESENCA);
+  return list;
+}
+
 function formatDate(s){ if(!s)return''; const p=String(s).split('-'); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:s; }
 function badgeStatus(s){ const u=String(s||'').toUpperCase(); if(u.includes('NÃO'))return '<span class="badge no">NÃO COMPARECERÁ</span>'; if(u.includes('CONFIRM'))return '<span class="badge active">CONFIRMADO</span>'; return '<span class="badge pending">PENDENTE</span>'; }
 
@@ -105,6 +196,54 @@ const __photoFallbackQueue=new Map();
 const __photoFallbackMemory=new Map();
 let __photoFallbackTimer=null;
 
+/* Cache persistente de fotos de contingência.
+ * A foto original continua no Drive; o navegador guarda somente a versão
+ * Base64 já usada naquele aparelho, evitando novo Drive -> Apps Script em
+ * aberturas posteriores no iPhone/iPad/PWA.
+ */
+const __PHOTO_DB_NAME='SGCM22_PHOTOS';
+const __PHOTO_DB_STORE='photos';
+let __photoDbPromise=null;
+function photoDbOpen(){
+  if(!('indexedDB' in window))return Promise.resolve(null);
+  if(__photoDbPromise)return __photoDbPromise;
+  __photoDbPromise=new Promise(resolve=>{
+    try{
+      const req=indexedDB.open(__PHOTO_DB_NAME,1);
+      req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(__PHOTO_DB_STORE))db.createObjectStore(__PHOTO_DB_STORE,{keyPath:'id'});};
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>resolve(null);
+    }catch(e){resolve(null);}
+  });
+  return __photoDbPromise;
+}
+async function photoDbGet(id){
+  const db=await photoDbOpen();if(!db)return'';
+  return new Promise(resolve=>{
+    try{
+      const tx=db.transaction(__PHOTO_DB_STORE,'readonly');
+      const req=tx.objectStore(__PHOTO_DB_STORE).get(String(id));
+      req.onsuccess=()=>{
+        const r=req.result;
+        if(!r||!r.data){resolve('');return;}
+        if(Date.now()-Number(r.ts||0)>90*24*60*60*1000){resolve('');return;}
+        resolve(String(r.data||''));
+      };
+      req.onerror=()=>resolve('');
+    }catch(e){resolve('');}
+  });
+}
+async function photoDbPut(id,data){
+  if(!data||!String(data).startsWith('data:image/'))return;
+  // Evita armazenar acidentalmente blobs muito grandes por autoridade.
+  if(String(data).length>1200000)return;
+  const db=await photoDbOpen();if(!db)return;
+  try{
+    const tx=db.transaction(__PHOTO_DB_STORE,'readwrite');
+    tx.objectStore(__PHOTO_DB_STORE).put({id:String(id),data:String(data),ts:Date.now()});
+  }catch(e){}
+}
+
 async function fallbackPhoto(img){
   if(!img||img.dataset.fallback==='1'||img.dataset.fallback==='queued')return;
   const id=String(img.dataset.fileId||'').trim();
@@ -115,6 +254,14 @@ async function fallbackPhoto(img){
     if(data){img.dataset.fallback='1';img.src=data;}
     else img.replaceWith(placeholderNode(img.className,'FOTO<br>INDISP.'));
     return;
+  }
+
+  img.dataset.fallback='cache';
+  const cached=await photoDbGet(id);
+  if(!img.isConnected)return;
+  if(cached){
+    __photoFallbackMemory.set(id,cached);
+    img.dataset.fallback='1';img.src=cached;return;
   }
 
   img.dataset.fallback='queued';
@@ -140,6 +287,7 @@ async function flushPhotoFallbackQueue(){
     chunk.forEach(([id,imgs])=>{
       const data=map[id]||'';
       __photoFallbackMemory.set(id,data);
+      if(data)photoDbPut(id,data);
       imgs.forEach(img=>{
         if(!img||!img.isConnected)return;
         if(data){
@@ -169,17 +317,15 @@ function guestWarningsHtml(g){
   return out.length?'<div class="data-warnings">'+out.join('')+'</div>':'';
 }
 
-async function reloadBootstrap(){
+async function reloadBootstrap(options={}){
+  if(options.operational!==false)return reloadOperationalSnapshot(options);
   try{
-    state.bootstrap=await server('apiBootstrap');
-    cacheSet('bootstrap',state.bootstrap);
+    state.bootstrap=await server('apiBootstrap');cacheSet('bootstrap',state.bootstrap);
   }catch(e){
-    const cached=cacheGet('bootstrap',24*60*60*1000);
-    if(!cached)throw e;
-    state.bootstrap=cached;
-    showToast('Sem resposta do backend. Exibindo última sincronização.');
+    const cached=cacheGet('bootstrap',24*60*60*1000);if(!cached)throw e;
+    state.bootstrap=cached;if(!options.silent)showToast('Sem resposta do backend. Exibindo última sincronização.');
   }
-  updateHeader();
+  updateHeader();return state.bootstrap;
 }
 function updateHeader(){
   const a=activeCeremony(), h=$('#headerContext'), b=$('#contextBanner');
@@ -190,7 +336,13 @@ function updateHeader(){
 
 async function boot(){
   try{
-    apiUrl(); await reloadBootstrap(); navigate(activeCeremony()?'recepcao':'cerimonias');
+    apiUrl();
+    // Dá uma pequena janela para o bridge ficar pronto. Se Safari/PWA bloquear
+    // o iframe, o SGCM segue pela API HTTP antiga sem perder funcionalidade.
+    await initBridgeTransport(2400);
+    await reloadOperationalSnapshot();
+    startOperationRevisionWatch();
+    navigate(activeCeremony()?'recepcao':'cerimonias');
   }catch(e){
     $('#main').innerHTML=`<div class="notice danger-notice">${esc(e.message)}</div><div class="card"><p class="small">Confira a URL /exec do Apps Script em <b>config.js</b>.</p></div>`;
   }
@@ -202,15 +354,16 @@ function navigate(s){
   const map={evento:renderEvento,recepcao:renderRecepcao,presentes:renderPresentes,familiares:renderFamiliares,cerimonias:renderCerimonias,autoridades:renderAutoridades,tribuna:renderTribuna,nominata:renderNominata,estatisticas:renderEstatisticas,documentos:renderDocumentos,guia:renderGuia};
   $('#main').innerHTML='<div class="loading">Carregando...</div>';
   Promise.resolve(map[s]?map[s]():renderRecepcao()).catch(e=>$('#main').innerHTML=`<div class="notice danger-notice">${esc(e.message)}</div>`);
+  if(typeof OPERATION_SCREENS!=='undefined'&&OPERATION_SCREENS.has(s))setTimeout(checkOperationRevision,80);
 }
 
-function refreshCurrent(){ reloadBootstrap().then(()=>navigate(state.screen)); }
+function refreshCurrent(){ reloadOperationalSnapshot().then(()=>navigate(state.screen)); }
 
 /* -------------------------------------------------------------------------- */
 /* CERIMÔNIAS                                                                  */
 /* -------------------------------------------------------------------------- */
 async function renderCerimonias(){
-  const list=await server('apiListarCerimonias');
+  const list=(state.bootstrap?.cerimonias||[]);
   let html=`<div class="page-head mobile-inline-head"><div><div class="section-title">CERIMÔNIAS</div><div class="small muted">Prepare várias cerimônias; somente uma pode permanecer ativa.</div></div><div class="page-actions single"><button class="btn primary" onclick="openCeremonyForm()">NOVA CERIMÔNIA</button></div></div>`;
   if(!list.length) html+='<div class="empty">Nenhuma cerimônia cadastrada.</div>';
   else html+=`<div class="ceremony-grid">${list.map(c=>`<div class="card ${c.STATUS==='ATIVA'?'active-card':'standby-card'}"><div class="row between"><div class="grow"><div class="event-name">${esc(c.NOME_EVENTO)}</div><div class="small muted">${esc(formatDate(c.DATA))}${c.LOCAL?' | '+esc(c.LOCAL):''}</div></div><span class="badge ${c.STATUS==='ATIVA'?'active':''}">${esc(c.STATUS)}</span></div><div class="actions compact">${c.STATUS==='ATIVA'?'<span class="small muted">Cerimônia operacional.</span>':`<button class="btn primary sm" onclick="activateCeremony('${c.ID_CERIMONIA}')">ATIVAR</button><button class="btn danger sm" onclick="deleteCeremony('${c.ID_CERIMONIA}')">EXCLUIR</button>`}<button class="btn outline sm" onclick="openCeremonyForm('${c.ID_CERIMONIA}')">EDITAR</button></div></div>`).join('')}</div>`;
@@ -221,9 +374,9 @@ function openCeremonyForm(id=''){
   const c=(state.bootstrap?.cerimonias||[]).find(x=>x.ID_CERIMONIA===id)||{};
   openModal(`${modalCloseButton()}<h2>${id?'Editar':'Nova'} cerimônia</h2><div class="field"><label>Nome</label><input id="ceName" value="${esc(c.NOME_EVENTO||'')}"></div><div class="grid2"><div class="field"><label>Data</label><input id="ceDate" type="date" value="${esc(c.DATA||'')}"></div><div class="field"><label>Local</label><input id="ceLocal" value="${esc(c.LOCAL||'')}"></div></div><button class="btn primary block" onclick="saveCeremony('${esc(id)}')">SALVAR</button>`);
 }
-async function saveCeremony(id){ await server('apiSalvarCerimonia',{ID_CERIMONIA:id,NOME_EVENTO:$('#ceName').value,DATA:$('#ceDate').value,LOCAL:$('#ceLocal').value}); closeModal(); await reloadBootstrap(); renderCerimonias(); }
-async function activateCeremony(id){ const atual=activeCeremony(); if(atual&&!confirm(`A cerimônia atualmente ativa é "${atual.NOME_EVENTO}". Colocá-la em STANDBY e ativar a selecionada?`))return; await server('apiAtivarCerimonia',id); await reloadBootstrap(); showToast('Cerimônia ativada.'); renderCerimonias(); }
-async function deleteCeremony(id){ if(!confirm('Excluir a cerimônia e suas duas abas de planejamento? Esta operação não pode ser desfeita.'))return; await server('apiExcluirCerimonia',id); await reloadBootstrap(); renderCerimonias(); }
+async function saveCeremony(id){ await server('apiSalvarCerimonia',{ID_CERIMONIA:id,NOME_EVENTO:$('#ceName').value,DATA:$('#ceDate').value,LOCAL:$('#ceLocal').value}); closeModal(); await reloadOperationalSnapshot({silent:true}); renderCerimonias(); }
+async function activateCeremony(id){ const atual=activeCeremony(); if(atual&&!confirm(`A cerimônia atualmente ativa é "${atual.NOME_EVENTO}". Colocá-la em STANDBY e ativar a selecionada?`))return; await server('apiAtivarCerimonia',id); await reloadOperationalSnapshot({silent:true}); showToast('Cerimônia ativada.'); renderCerimonias(); }
+async function deleteCeremony(id){ if(!confirm('Excluir a cerimônia e suas duas abas de planejamento? Esta operação não pode ser desfeita.'))return; await server('apiExcluirCerimonia',id); await reloadOperationalSnapshot({silent:true}); renderCerimonias(); }
 
 /* -------------------------------------------------------------------------- */
 /* EVENTO                                                                      */
@@ -255,12 +408,8 @@ function renderEventoConteudo(c,guests){
 }
 async function renderEvento(){
   const c=contextCeremony(); if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;}
-  const key=ceremonyCacheKey('evento',c.ID_CERIMONIA), cached=cacheGet(key,24*60*60*1000);
-  if(cached) renderEventoConteudo(c,cached);
-  try{
-    const guests=await server('apiListarConvidados',c.ID_CERIMONIA,'TODOS');
-    cacheSet(key,guests); renderEventoConteudo(c,guests);
-  }catch(e){if(!cached)throw e;showToast('Modo contingência: exibindo o último Evento sincronizado.');}
+  if(!operacaoAtual().ready||operacaoAtual().idCer!==String(c.ID_CERIMONIA)) await reloadOperationalSnapshot({silent:true});
+  renderEventoConteudo(c,convidadosOperacao());
 }
 
 function eventPersonCard(g,label){
@@ -268,9 +417,9 @@ function eventPersonCard(g,label){
 }
 
 async function openGuestEventDetail(id){
-  const c=contextCeremony(), g=await server('apiObterConvidado',c.ID_CERIMONIA,id); if(!g)return;
+  const c=contextCeremony(), g=convidadoOperacaoPorId(id)||await server('apiObterConvidado',c.ID_CERIMONIA,id); if(!g)return;
   state.currentGuest=g;
-  const labels=eventOrderMap(state.eventGuests.length?state.eventGuests:await server('apiListarConvidados',c.ID_CERIMONIA,'TODOS'));
+  const labels=eventOrderMap(state.eventGuests.length?state.eventGuests:convidadosOperacao());
   const label=labels[id]||'';
   const missing=(g.DADOS_FALTANTES||[]);
   const warning=missing.length?`<div class="notice ${g.CADASTRADO_BANCO?'':'danger-notice'}"><b>Cadastro:</b> ${esc(missing.join(', '))}. Isso não bloqueia a participação na cerimônia.</div>`:'';
@@ -284,39 +433,34 @@ async function openGuestEventDetail(id){
 
 async function guestPresence(id,on){
   const c=contextCeremony(); if(!c)return;
-  const anterior=(state.visiblePeople||[]).slice();
+  const antigo=convidadoOperacaoPorId(id);if(!antigo)return;
+  const anterior=Object.assign({},antigo);
   closeModal();
 
-  // Atualização otimista: a equipe percebe a ação imediatamente, mesmo em 4G
-  // instável. O backend é confirmado em seguida.
-  if(state.screen==='recepcao' && on){
-    state.visiblePeople=(state.visiblePeople||[]).filter(g=>g.ID_CONVIDADO!==id);
-    $('#peopleArea').innerHTML=operationPersonList(state.visiblePeople,true);
-  }else if(state.screen==='presentes' && !on){
-    state.visiblePeople=(state.visiblePeople||[]).filter(g=>g.ID_CONVIDADO!==id);
-    $('#peopleArea').innerHTML=operationPersonList(state.visiblePeople,false);
-  }
+  atualizarConvidadoLocal(id,{PRESENCA:!!on,PRESENTE_EM:on?new Date().toISOString():''});
+  if(state.screen==='recepcao')renderOperationScreen(c,filtroOperacao('RECEPCAO'),'RECEPCAO');
+  else if(state.screen==='presentes')renderOperationScreen(c,filtroOperacao('PRESENTES'),'PRESENTES');
+  else if(state.screen==='evento')renderEventoConteudo(c,convidadosOperacao());
+
   showToast(on?'Confirmando presença...':'Cancelando presença...');
   try{
     await server(on?'apiMarcarPresenca':'apiCancelarPresenca',c.ID_CERIMONIA,id);
-    cacheRemove(ceremonyCacheKey('recepcao',c.ID_CERIMONIA));
-    cacheRemove(ceremonyCacheKey('presentes',c.ID_CERIMONIA));
-    cacheRemove(ceremonyCacheKey('evento',c.ID_CERIMONIA));
     showToast(on?'Presença confirmada.':'Presença cancelada.');
-    if(state.screen!=='recepcao' && state.screen!=='presentes') navigate(state.screen);
   }catch(e){
-    state.visiblePeople=anterior;
-    if($('#peopleArea')) $('#peopleArea').innerHTML=operationPersonList(anterior,state.screen==='recepcao');
+    atualizarConvidadoLocal(id,anterior);
+    if(state.screen==='recepcao')renderOperationScreen(c,filtroOperacao('RECEPCAO'),'RECEPCAO');
+    else if(state.screen==='presentes')renderOperationScreen(c,filtroOperacao('PRESENTES'),'PRESENTES');
+    else if(state.screen==='evento')renderEventoConteudo(c,convidadosOperacao());
     showToast('Não foi possível confirmar a alteração.');
     throw e;
   }
 }
-async function changeGuestStatus(id){ const c=contextCeremony(); const g=state.currentGuest||await server('apiObterConvidado',c.ID_CERIMONIA,id); openModal(`${modalCloseButton()}<h2>Alterar status</h2><div class="field"><label>Status da confirmação</label><select id="statusGuest">${['CONFIRMADO','PENDENTE','NÃO COMPARECERÁ'].map(x=>`<option ${g.STATUS_CONFIRMACAO===x?'selected':''}>${x}</option>`).join('')}</select></div><button class="btn primary block" onclick="saveGuestStatus('${id}')">SALVAR</button>`); }
-async function saveGuestStatus(id){ const c=contextCeremony(); await server('apiAtualizarStatusConvidado',c.ID_CERIMONIA,id,$('#statusGuest').value); cacheRemove(ceremonyCacheKey('evento',c.ID_CERIMONIA)); cacheRemove(ceremonyCacheKey('recepcao',c.ID_CERIMONIA)); closeModal(); showToast('Status atualizado.'); navigate(state.screen); }
-async function setRole(id,role){ const c=contextCeremony(); await server('apiDefinirPapelConvidado',c.ID_CERIMONIA,id,role); cacheRemove(ceremonyCacheKey('evento',c.ID_CERIMONIA)); closeModal(); showToast('Definição atualizada.'); renderEvento(); }
-async function toggleExclude(id){ const c=contextCeremony(); await server('apiToggleExcluirTribuna',c.ID_CERIMONIA,id); cacheRemove(ceremonyCacheKey('evento',c.ID_CERIMONIA)); closeModal(); renderEvento(); }
+async function changeGuestStatus(id){ const c=contextCeremony(); const g=state.currentGuest||convidadoOperacaoPorId(id)||await server('apiObterConvidado',c.ID_CERIMONIA,id); openModal(`${modalCloseButton()}<h2>Alterar status</h2><div class="field"><label>Status da confirmação</label><select id="statusGuest">${['CONFIRMADO','PENDENTE','NÃO COMPARECERÁ'].map(x=>`<option ${g.STATUS_CONFIRMACAO===x?'selected':''}>${x}</option>`).join('')}</select></div><button class="btn primary block" onclick="saveGuestStatus('${id}')">SALVAR</button>`); }
+async function saveGuestStatus(id){ const c=contextCeremony(),status=$('#statusGuest').value; await server('apiAtualizarStatusConvidado',c.ID_CERIMONIA,id,status); atualizarConvidadoLocal(id,{STATUS_CONFIRMACAO:status}); closeModal(); showToast('Status atualizado.'); navigate(state.screen); }
+async function setRole(id,role){ const c=contextCeremony(); await server('apiDefinirPapelConvidado',c.ID_CERIMONIA,id,role); await reloadOperationalSnapshot({silent:true}); closeModal(); showToast('Definição atualizada.'); renderEvento(); }
+async function toggleExclude(id){ const c=contextCeremony(); await server('apiToggleExcluirTribuna',c.ID_CERIMONIA,id); await reloadOperationalSnapshot({silent:true}); closeModal(); renderEvento(); }
 async function addGuestToNominata(id){ const c=contextCeremony(); await server('apiAdicionarItemNominata',{ID_CERIMONIA:c.ID_CERIMONIA,TIPO_ITEM:'AUTORIDADE',REFERENCIA_ID:id}); closeModal(); showToast('Autoridade adicionada à nominata.'); }
-async function moveGuest(id,d){ const c=contextCeremony(); await server('apiMoverConvidado',c.ID_CERIMONIA,id,d); cacheRemove(ceremonyCacheKey('evento',c.ID_CERIMONIA)); closeModal(); renderEvento(); }
+async function moveGuest(id,d){ const c=contextCeremony(); await server('apiMoverConvidado',c.ID_CERIMONIA,id,d); await reloadOperationalSnapshot({silent:true}); closeModal(); renderEvento(); }
 
 /* -------------------------------------------------------------------------- */
 /* RECEPÇÃO / PRESENTES                                                        */
@@ -333,21 +477,13 @@ function renderOperationScreen(c,list,tipo){
 }
 async function renderRecepcao(){
   const c=contextCeremony(); if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;}
-  const key=ceremonyCacheKey('recepcao',c.ID_CERIMONIA), cached=cacheGet(key,24*60*60*1000);
-  if(cached) renderOperationScreen(c,cached,'RECEPCAO');
-  try{
-    const list=await server('apiListarConvidadosResumo',c.ID_CERIMONIA,'RECEPCAO');
-    cacheSet(key,list); renderOperationScreen(c,list,'RECEPCAO');
-  }catch(e){ if(!cached)throw e; showToast('Modo contingência: usando a última lista sincronizada.'); }
+  if(!operacaoAtual().ready||operacaoAtual().idCer!==String(c.ID_CERIMONIA))await reloadOperationalSnapshot({silent:true});
+  renderOperationScreen(c,filtroOperacao('RECEPCAO'),'RECEPCAO');
 }
 async function renderPresentes(){
   const c=contextCeremony(); if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;}
-  const key=ceremonyCacheKey('presentes',c.ID_CERIMONIA), cached=cacheGet(key,24*60*60*1000);
-  if(cached) renderOperationScreen(c,cached,'PRESENTES');
-  try{
-    const list=await server('apiListarConvidadosResumo',c.ID_CERIMONIA,'PRESENTES');
-    cacheSet(key,list); renderOperationScreen(c,list,'PRESENTES');
-  }catch(e){ if(!cached)throw e; showToast('Modo contingência: usando a última lista sincronizada.'); }
+  if(!operacaoAtual().ready||operacaoAtual().idCer!==String(c.ID_CERIMONIA))await reloadOperationalSnapshot({silent:true});
+  renderOperationScreen(c,filtroOperacao('PRESENTES'),'PRESENTES');
 }
 
 function filterVisiblePeople(q,showStatus){
@@ -357,7 +493,7 @@ function filterVisiblePeople(q,showStatus){
 }
 
 async function openGuestOperationDetail(id){
-  const c=contextCeremony(), g=await server('apiObterConvidadoResumo',c.ID_CERIMONIA,id); if(!g)return;
+  const c=contextCeremony(), g=convidadoOperacaoPorId(id)||await server('apiObterConvidadoResumo',c.ID_CERIMONIA,id); if(!g)return;
   const isPresent=state.screen==='presentes' || g.PRESENCA;
   openModal(`${modalCloseButton()}${photoHtml(g,'modal-photo')}<h2>${esc((g.POSTO?g.POSTO+' ':'')+(g.NOME_GUERRA||g.NOME_COMPLETO))}</h2><dl class="detail-grid compact"><dt>Posto</dt><dd>${esc(g.POSTO||'—')}</dd><dt>Nome de guerra</dt><dd>${esc(g.NOME_GUERRA||'—')}</dd><dt>Nome completo</dt><dd>${esc(g.NOME_COMPLETO||'—')}</dd><dt>Cargo</dt><dd>${esc(g.CARGO_ATUAL||'—')}</dd><dt>Força / tipo</dt><dd>${esc(g.FORCA||'—')}</dd></dl><div class="actions">${isPresent?`<button class="btn danger block" onclick="guestPresence('${id}',false)">CANCELAR PRESENÇA</button>`:`<button class="btn ok block" onclick="guestPresence('${id}',true)">CONFIRMAR PRESENÇA</button>`}</div>`);
 }
@@ -366,7 +502,7 @@ async function openGuestOperationDetail(id){
 /* ADICIONAR CONVIDADO / CADASTRAR NO BANCO                                   */
 /* -------------------------------------------------------------------------- */
 async function openAddGuest(preselectId=''){
-  const c=contextCeremony(), guests=await server('apiListarConvidados',c.ID_CERIMONIA,'TODOS');
+  const c=contextCeremony(), guests=convidadosOperacao();
   const labels=eventOrderMap(guests);
   state.addGuestSelectedAuthority=preselectId||null;
   openModal(`${modalCloseButton()}<h2>Adicionar convidado</h2><p class="small muted">Selecione a autoridade, escolha onde ela entrará e somente depois confirme em ADICIONAR À CERIMÔNIA.</p><div class="field"><label>Pesquisar no banco de autoridades</label><input id="agSearch" oninput="searchAuthorityForGuest()" placeholder="Nome, posto ou cargo"></div><div id="agSelected" class="selected-guest-box">${preselectId?'<div class="small muted">Carregando autoridade selecionada...</div>':'<div class="small muted">Nenhuma autoridade selecionada.</div>'}</div><div id="agResults" class="person-list add-guest-results"></div><div class="grid2 add-guest-position"><div class="field"><label>Inserir em relação a</label><select id="agRef"><option value="">Final da lista</option>${guests.map(g=>`<option value="${g.ID_CONVIDADO}">${esc(labels[g.ID_CONVIDADO]+' — '+g.POSTO+' '+g.NOME_GUERRA)}</option>`).join('')}</select></div><div class="field"><label>Posição</label><select id="agPos"><option value="DEPOIS">Depois</option><option value="ANTES">Antes</option></select></div></div><div class="modal-action-row"><button class="btn outline" onclick="openAuthorityForm('',true)">NOVA AUTORIDADE</button><button id="agAddBtn" class="btn primary" onclick="confirmAddSelectedAuthority()" ${preselectId?'':'disabled'}>ADICIONAR À CERIMÔNIA</button></div>`,true);
@@ -388,28 +524,30 @@ async function confirmAddSelectedAuthority(){
   const id=state.addGuestSelectedAuthority; if(!id){showToast('Selecione uma autoridade.');return;}
   const c=contextCeremony();
   await server('apiAdicionarConvidado',c.ID_CERIMONIA,{ID_AUTORIDADE:id,REFERENCIA_ID:$('#agRef').value,POSICAO:$('#agPos').value,STATUS_CONFIRMACAO:'PENDENTE'});
-  cacheRemove(ceremonyCacheKey('evento',c.ID_CERIMONIA)); closeModal(); state.addGuestSelectedAuthority=null; showToast('Convidado adicionado.'); renderEvento();
+  await reloadOperationalSnapshot({silent:true}); closeModal(); state.addGuestSelectedAuthority=null; showToast('Convidado adicionado.'); renderEvento();
 }
 
 async function openRegisterGuestAuthority(id){
-  const c=contextCeremony(),g=await server('apiObterConvidado',c.ID_CERIMONIA,id); if(!g)return;
+  const c=contextCeremony(),g=convidadoOperacaoPorId(id)||await server('apiObterConvidado',c.ID_CERIMONIA,id); if(!g)return;
   openModal(`${modalCloseButton()}<h2>Cadastrar convidado no banco</h2><p class="small muted">A autoridade será inserida fisicamente em AUTORIDADES na mesma posição relativa da cerimônia. Nenhum campo abaixo é requisito para manter o convidado na formatura.</p><div class="grid2"><div class="field"><label>Posto / tratamento</label><input id="rgPosto" value="${esc(g.POSTO||'')}"></div><div class="field"><label>Nome de guerra</label><input id="rgGuerra" value="${esc(g.NOME_GUERRA||'')}"></div></div><div class="field"><label>Nome completo</label><input id="rgNome" value="${esc(g.NOME_COMPLETO||'')}"></div><div class="field"><label>Cargo atual</label><input id="rgCargo" value="${esc(g.CARGO_ATUAL||'')}"></div><div class="grid2"><div class="field"><label>Força / tipo</label><select id="rgForca"><option value="">Selecione</option>${authorityForceOptions('')}</select></div><div class="field"><label>Situação</label><select id="rgSit"><option value="">Selecione</option><option>ATIVA</option><option>RESERVA</option></select></div></div><div class="grid2"><div class="field"><label>Sexo</label><select id="rgSexo"><option value=""></option><option>MASCULINO</option><option>FEMININO</option></select></div><div class="field"><label>Foto</label><input id="rgFoto" type="file" accept="image/*" capture="environment"></div></div><button class="btn primary block" onclick="saveGuestToBank('${id}')">SALVAR EM AUTORIDADES</button>`,true);
 }
 async function saveGuestToBank(id){
   const c=contextCeremony(),f=$('#rgFoto').files[0],payload={POSTO:$('#rgPosto').value,NOME_COMPLETO:$('#rgNome').value,NOME_GUERRA:$('#rgGuerra').value,CARGO_ATUAL:$('#rgCargo').value,FORCA:$('#rgForca').value,SITUACAO:$('#rgSit').value,SEXO:$('#rgSexo').value,HONRAS_OVERRIDE:'AUTO',PRESIDIR_OVERRIDE:'AUTO'};
   if(f){const img=await readImageForUpload(f);payload.FOTO_NOME=img.name;payload.FOTO_MIME=img.mime;payload.FOTO_BASE64=img.data;}
   await server('apiCadastrarConvidadoNoBanco',c.ID_CERIMONIA,id,payload);
+  await reloadOperationalSnapshot({silent:true});
   closeModal(); showToast('Autoridade cadastrada no banco.');
-  cacheRemove(ceremonyCacheKey('recepcao',c.ID_CERIMONIA));
-  cacheRemove(ceremonyCacheKey('presentes',c.ID_CERIMONIA));
-  cacheRemove(ceremonyCacheKey('evento',c.ID_CERIMONIA));
   navigate(state.screen);
 }
 
 /* -------------------------------------------------------------------------- */
 /* AUTORIDADES                                                                 */
 /* -------------------------------------------------------------------------- */
-function authorityForceOptions(selected){ return ['Aeronáutica','Marinha','Exército','Ministro da Defesa','Autoridade Civil','Militar Estrangeiro'].map(x=>`<option ${selected===x?'selected':''}>${x}</option>`).join(''); }
+function authorityForceOptions(selected){
+  const base=['Presidente da República','Vice-Presidente da República','Presidente do Senado Federal','Presidente da Câmara dos Deputados','Presidente do Supremo Tribunal Federal','Ministro de Estado da Defesa','Autoridade Civil','Aeronáutica','Exército','Marinha'];
+  const list=selected&&!base.includes(selected)?[selected].concat(base):base;
+  return list.map(x=>`<option ${selected===x?'selected':''}>${x}</option>`).join('');
+}
 function overrideOptions(selected){ return ['AUTO','SIM','NÃO'].map(x=>`<option ${selected===x?'selected':''}>${x}</option>`).join(''); }
 
 function renderAuthorityPage(page){
@@ -441,15 +579,16 @@ async function openAuthorityDetail(id){
 
 async function openAuthorityForm(id='',addAfter=false){
   const a=id?await server('apiObterAutoridade',id):{};
-  openModal(`${modalCloseButton()}<h2>${id?'Editar':'Nova'} autoridade</h2>${a&&a.FOTO_FILE_ID?photoHtml(a,'modal-photo'):''}${id?`<div class="record-id">ID: ${esc(a.ID_AUTORIDADE||id)}</div>`:''}<div class="grid2"><div class="field"><label>Posto / tratamento</label><input id="aPosto" value="${esc(a?.POSTO||'')}"></div><div class="field"><label>Nome de guerra</label><input id="aGuerra" value="${esc(a?.NOME_GUERRA||'')}"></div></div><div class="field"><label>Nome completo</label><input id="aNome" value="${esc(a?.NOME_COMPLETO||'')}"></div><div class="grid2"><div class="field"><label>Posto / tratamento por extenso</label><input id="aPostoExt" data-original="${esc(a?.POSTO_EXTENSO||'')}" value="${esc(a?.POSTO_EXTENSO||'')}"></div><div class="field"><label>Vocativo</label><input id="aVoc" value="${esc(a?.VOCATIVO||'')}"></div></div><div class="field"><label>Cargo atual</label><input id="aCargo" value="${esc(a?.CARGO_ATUAL||'')}"></div><div class="grid2"><div class="field"><label>Força / tipo</label><select id="aForca"><option value="">Selecione</option>${authorityForceOptions(a?.FORCA||'')}</select></div><div class="field"><label>Situação</label><select id="aSit"><option value="">Selecione</option><option ${a?.SITUACAO==='ATIVA'?'selected':''}>ATIVA</option><option ${a?.SITUACAO==='RESERVA'?'selected':''}>RESERVA</option></select></div></div><div class="grid2"><div class="field"><label>Sexo</label><select id="aSexo"><option value=""></option><option ${a?.SEXO==='MASCULINO'?'selected':''}>MASCULINO</option><option ${a?.SEXO==='FEMININO'?'selected':''}>FEMININO</option></select></div><div class="field"><label>Foto</label><input id="aFoto" type="file" accept="image/*" capture="environment"></div></div><div class="grid2"><div class="field"><label>Faz jus a honras</label><select id="aHonras">${overrideOptions(a?.HONRAS_OVERRIDE||'AUTO')}</select><div class="small muted" style="margin-top:4px">AUTO aplica a regra; SIM/NÃO força a correção imediata.</div></div><div class="field"><label>Pode presidir</label><select id="aPresidir">${overrideOptions(a?.PRESIDIR_OVERRIDE||'AUTO')}</select><div class="small muted" style="margin-top:4px">AUTO aplica a regra; SIM/NÃO força a correção imediata.</div></div></div><div class="notice">Alterações feitas aqui são gravadas diretamente no banco AUTORIDADES e passam a valer para a cerimônia.</div><button class="btn primary block" onclick="saveAuthority('${esc(id)}',${addAfter?'true':'false'})">SALVAR ALTERAÇÕES</button>`,true);
+  openModal(`${modalCloseButton()}<h2>${id?'Editar':'Nova'} autoridade</h2>${a&&a.FOTO_FILE_ID?photoHtml(a,'modal-photo'):''}${id?`<div class="record-id">ID: ${esc(a.ID_AUTORIDADE||id)}</div>`:''}<div class="grid2"><div class="field"><label>Posto / tratamento</label><input id="aPosto" value="${esc(a?.POSTO||'')}"></div><div class="field"><label>Nome de guerra</label><input id="aGuerra" value="${esc(a?.NOME_GUERRA||'')}"></div></div><div class="field"><label>Nome completo</label><input id="aNome" value="${esc(a?.NOME_COMPLETO||'')}"></div><div class="grid2"><div class="field"><label>Posto / tratamento por extenso</label><input id="aPostoExt" value="${esc(a?.POSTO_EXTENSO||'')}" readonly><div class="small muted" style="margin-top:4px">Calculado automaticamente pela aba POSTOS.</div></div><div class="field"><label>Vocativo</label><input id="aVoc" value="${esc(a?.VOCATIVO||'')}"></div></div><div class="field"><label>Cargo atual</label><input id="aCargo" value="${esc(a?.CARGO_ATUAL||'')}"></div><div class="grid2"><div class="field"><label>Força / tipo</label><select id="aForca"><option value="">Selecione</option>${authorityForceOptions(a?.FORCA||'')}</select></div><div class="field"><label>Situação</label><select id="aSit"><option value="">Selecione</option><option ${a?.SITUACAO==='ATIVA'?'selected':''}>ATIVA</option><option ${a?.SITUACAO==='RESERVA'?'selected':''}>RESERVA</option></select></div></div><div class="grid2"><div class="field"><label>Sexo</label><select id="aSexo"><option value=""></option><option ${a?.SEXO==='MASCULINO'?'selected':''}>MASCULINO</option><option ${a?.SEXO==='FEMININO'?'selected':''}>FEMININO</option></select></div><div class="field"><label>Foto</label><input id="aFoto" type="file" accept="image/*" capture="environment"></div></div><div class="grid2"><div class="field"><label>Faz jus a honras</label><select id="aHonras">${overrideOptions(a?.HONRAS_OVERRIDE||'AUTO')}</select><div class="small muted" style="margin-top:4px">AUTO aplica a regra; SIM/NÃO força a correção imediata.</div></div><div class="field"><label>Pode presidir</label><select id="aPresidir">${overrideOptions(a?.PRESIDIR_OVERRIDE||'AUTO')}</select><div class="small muted" style="margin-top:4px">AUTO aplica a regra; SIM/NÃO força a correção imediata.</div></div></div><div class="notice">Alterações feitas aqui são gravadas diretamente no banco AUTORIDADES e passam a valer para a cerimônia.</div><button class="btn primary block" onclick="saveAuthority('${esc(id)}',${addAfter?'true':'false'})">SALVAR ALTERAÇÕES</button>`,true);
 }
 
 async function saveAuthority(id,addAfter){
-  const f=$('#aFoto').files[0], postoExt=$('#aPostoExt');
-  const payload={ID_AUTORIDADE:id,POSTO:$('#aPosto').value,NOME_COMPLETO:$('#aNome').value,NOME_GUERRA:$('#aGuerra').value,POSTO_EXTENSO:postoExt.value,POSTO_EXTENSO_EDITADO:postoExt.value!==postoExt.dataset.original,CARGO_ATUAL:$('#aCargo').value,FORCA:$('#aForca').value,SITUACAO:$('#aSit').value,SEXO:$('#aSexo').value,VOCATIVO:$('#aVoc').value,HONRAS_OVERRIDE:$('#aHonras').value,PRESIDIR_OVERRIDE:$('#aPresidir').value};
+  const f=$('#aFoto').files[0];
+  const payload={ID_AUTORIDADE:id,POSTO:$('#aPosto').value,NOME_COMPLETO:$('#aNome').value,NOME_GUERRA:$('#aGuerra').value,CARGO_ATUAL:$('#aCargo').value,FORCA:$('#aForca').value,SITUACAO:$('#aSit').value,SEXO:$('#aSexo').value,VOCATIVO:$('#aVoc').value,HONRAS_OVERRIDE:$('#aHonras').value,PRESIDIR_OVERRIDE:$('#aPresidir').value};
   if(f){const img=await readImageForUpload(f);payload.FOTO_NOME=img.name;payload.FOTO_MIME=img.mime;payload.FOTO_BASE64=img.data;}
   const a=await server('apiSalvarAutoridade',payload); closeModal(); showToast('Autoridade salva.');
   cacheRemove('authority_first_page');
+  if(activeCeremony())try{await reloadOperationalSnapshot({silent:true});}catch(e){}
   if(addAfter){ await openAddGuest(a.ID_AUTORIDADE); $('#agSearch').value=a.NOME_COMPLETO; await searchAuthorityForGuest(); }
   else if(state.screen==='autoridades') renderAutoridades();
   else if(state.screen==='evento') renderEvento();
@@ -476,22 +615,35 @@ function readImageForUpload(file){
 /* -------------------------------------------------------------------------- */
 /* FAMILIARES                                                                  */
 /* -------------------------------------------------------------------------- */
-async function renderFamiliares(){ const c=contextCeremony(); if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;} const list=await server('apiListarFamiliares',c.ID_CERIMONIA,'TODOS'); $('#main').innerHTML=`<div class="page-head mobile-inline-head"><div><div class="section-title">FAMILIARES</div><div class="small muted">${esc(c.NOME_EVENTO)} | ${list.length} cadastrados</div></div><div class="page-actions single"><button class="btn primary" onclick="openFamilyForm()">ADICIONAR</button></div></div>${familyList(list)}`; }
-function familyList(list){ if(!list.length)return'<div class="empty">Nenhum familiar cadastrado.</div>'; return`<div class="person-list two-col">${list.map(f=>`<div class="person-card clickable" onclick="openFamilyDetail('${f.ID_FAMILIAR}')"><div class="avatar placeholder">FAM.</div><div class="grow"><div class="person-name">${esc(f.NOME)}</div><div class="person-sub">${esc(f.VINCULO+' de '+f.AUTORIDADE)}</div></div><div class="person-right">${f.PRESENCA?'<span class="badge present">PRESENTE</span>':badgeStatus(f.STATUS_CONFIRMACAO)}</div></div>`).join('')}</div>`; }
-async function openFamilyForm(id=''){ const c=contextCeremony(),[fams,guests]=await Promise.all([server('apiListarFamiliares',c.ID_CERIMONIA,'TODOS'),server('apiListarConvidadosResumo',c.ID_CERIMONIA,'TODOS')]); const f=fams.find(x=>x.ID_FAMILIAR===id)||{}; openModal(`${modalCloseButton()}<h2>${id?'Editar':'Adicionar'} familiar</h2><div class="field"><label>Nome</label><input id="fNome" value="${esc(f.NOME||'')}"></div><div class="grid2"><div class="field"><label>Vínculo</label><select id="fVinc">${['ESPOSA','ESPOSO','FILHO','FILHA','PAI','MÃE','OUTRO'].map(x=>`<option ${f.VINCULO===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="fStatus">${['CONFIRMADO','PENDENTE','NÃO COMPARECERÁ'].map(x=>`<option ${f.STATUS_CONFIRMACAO===x?'selected':''}>${x}</option>`).join('')}</select></div></div><div class="field"><label>Autoridade vinculada</label><select id="fAut">${guests.map(g=>`<option value="${esc(g.NOME_COMPLETO)}" ${f.AUTORIDADE===g.NOME_COMPLETO?'selected':''}>${esc(g.POSTO+' '+g.NOME_GUERRA)}</option>`).join('')}</select></div><button class="btn primary block" onclick="saveFamily('${id}',${Number.isFinite(Number(f.PRECEDENCIA))?Number(f.PRECEDENCIA):''})">SALVAR</button>`); }
-async function saveFamily(id,prec){ const c=contextCeremony(); await server('apiSalvarFamiliar',c.ID_CERIMONIA,{ID_FAMILIAR:id,NOME:$('#fNome').value,VINCULO:$('#fVinc').value,AUTORIDADE:$('#fAut').value,PRECEDENCIA:prec||'',STATUS_CONFIRMACAO:$('#fStatus').value}); closeModal(); renderFamiliares(); }
-async function openFamilyDetail(id){ const c=contextCeremony(),f=(await server('apiListarFamiliares',c.ID_CERIMONIA,'TODOS')).find(x=>x.ID_FAMILIAR===id); if(!f)return; openModal(`${modalCloseButton()}<h2>${esc(f.NOME)}</h2><p class="muted">${esc(f.VINCULO)} de ${esc(f.AUTORIDADE)}</p><dl class="detail-grid compact"><dt>Status</dt><dd>${badgeStatus(f.STATUS_CONFIRMACAO)}</dd></dl><div class="actions">${f.PRESENCA?`<button class="btn danger" onclick="familyPresence('${id}',false)">CANCELAR PRESENÇA</button>`:`<button class="btn ok" onclick="familyPresence('${id}',true)">CONFIRMAR PRESENÇA</button>`}<button class="btn outline" onclick="addFamilyToNominata('${id}')">ADICIONAR À NOMINATA</button><button class="btn outline" onclick="openFamilyForm('${id}')">EDITAR</button><button class="btn danger" onclick="deleteFamily('${id}')">EXCLUIR</button></div>`); }
-async function familyPresence(id,on){ const c=contextCeremony(); await server(on?'apiMarcarPresencaFamiliar':'apiCancelarPresencaFamiliar',c.ID_CERIMONIA,id); closeModal(); renderFamiliares(); }
-async function addFamilyToNominata(id){ const c=contextCeremony(); await server('apiAdicionarItemNominata',{ID_CERIMONIA:c.ID_CERIMONIA,TIPO_ITEM:'FAMILIAR',REFERENCIA_ID:id}); closeModal(); showToast('Familiar adicionado à nominata.'); }
-async function deleteFamily(id){ if(!confirm('Excluir este familiar?'))return; const c=contextCeremony(); await server('apiExcluirFamiliar',c.ID_CERIMONIA,id); closeModal(); renderFamiliares(); }
-
-/* -------------------------------------------------------------------------- */
-/* TRIBUNA                                                                     */
-/* -------------------------------------------------------------------------- */
-function tribunaCircleHtml(p){
-  const g=p.autoridade||{},nome=(g.POSTO?g.POSTO+' ':'')+(g.NOME_GUERRA||g.NOME_COMPLETO||'');
-  return `<button class="seat-circle ${g.PRESENCA?'arrived':''}" title="${esc(nome)}" onclick="openGuestEventDetail('${esc(g.ID_CONVIDADO||'')}')"><span class="order">${esc(p.rotulo)}</span><span class="seat-name">${esc(nome)}</span>${p.funcao?`<span class="seat-role">${esc(p.funcao)}</span>`:''}</button>`;
+async function renderFamiliares(){
+  const c=contextCeremony();if(!c){$('#main').innerHTML='<div class="empty">Nenhuma cerimônia ativa.</div>';return;}
+  if(!operacaoAtual().ready||operacaoAtual().idCer!==String(c.ID_CERIMONIA))await reloadOperationalSnapshot({silent:true});
+  const list=familiaresOperacao();
+  $('#main').innerHTML=`<div class="page-head mobile-inline-head"><div><div class="section-title">FAMILIARES</div><div class="small muted">${esc(c.NOME_EVENTO)} | ${list.length} cadastrados</div></div><div class="page-actions single"><button class="btn primary" onclick="openFamilyForm()">ADICIONAR</button></div></div>${familyList(list)}`;
 }
+function familyList(list){ if(!list.length)return'<div class="empty">Nenhum familiar cadastrado.</div>'; return`<div class="person-list two-col">${list.map(f=>`<div class="person-card clickable" onclick="openFamilyDetail('${f.ID_FAMILIAR}')"><div class="avatar placeholder">FAM.</div><div class="grow"><div class="person-name">${esc(f.NOME)}</div><div class="person-sub">${esc(f.VINCULO+' de '+f.AUTORIDADE)}</div></div><div class="person-right">${f.PRESENCA?'<span class="badge present">PRESENTE</span>':badgeStatus(f.STATUS_CONFIRMACAO)}</div></div>`).join('')}</div>`; }
+async function openFamilyForm(id=''){
+  const c=contextCeremony();if(!c)return;
+  if(!operacaoAtual().ready)await reloadOperationalSnapshot({silent:true});
+  const fams=familiaresOperacao(),guests=convidadosOperacao(),f=fams.find(x=>x.ID_FAMILIAR===id)||{};
+  openModal(`${modalCloseButton()}<h2>${id?'Editar':'Adicionar'} familiar</h2><div class="field"><label>Nome</label><input id="fNome" value="${esc(f.NOME||'')}"></div><div class="grid2"><div class="field"><label>Vínculo</label><select id="fVinc">${['ESPOSA','ESPOSO','FILHO','FILHA','PAI','MÃE','OUTRO'].map(x=>`<option ${f.VINCULO===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="field"><label>Status</label><select id="fStatus">${['CONFIRMADO','PENDENTE','NÃO COMPARECERÁ'].map(x=>`<option ${f.STATUS_CONFIRMACAO===x?'selected':''}>${x}</option>`).join('')}</select></div></div><div class="field"><label>Autoridade vinculada</label><select id="fAut">${guests.map(g=>`<option value="${esc(g.NOME_COMPLETO)}" ${f.AUTORIDADE===g.NOME_COMPLETO?'selected':''}>${esc(g.POSTO+' '+g.NOME_GUERRA)}</option>`).join('')}</select></div><button class="btn primary block" onclick="saveFamily('${id}',${Number.isFinite(Number(f.PRECEDENCIA))?Number(f.PRECEDENCIA):''})">SALVAR</button>`);
+}
+async function saveFamily(id,prec){
+  const c=contextCeremony();await server('apiSalvarFamiliar',c.ID_CERIMONIA,{ID_FAMILIAR:id,NOME:$('#fNome').value,VINCULO:$('#fVinc').value,AUTORIDADE:$('#fAut').value,PRECEDENCIA:prec||'',STATUS_CONFIRMACAO:$('#fStatus').value});
+  await reloadOperationalSnapshot({silent:true});closeModal();renderFamiliares();
+}
+async function openFamilyDetail(id){
+  const f=familiarOperacaoPorId(id);if(!f)return;
+  openModal(`${modalCloseButton()}<h2>${esc(f.NOME)}</h2><p class="muted">${esc(f.VINCULO)} de ${esc(f.AUTORIDADE)}</p><dl class="detail-grid compact"><dt>Status</dt><dd>${badgeStatus(f.STATUS_CONFIRMACAO)}</dd></dl><div class="actions">${f.PRESENCA?`<button class="btn danger" onclick="familyPresence('${id}',false)">CANCELAR PRESENÇA</button>`:`<button class="btn ok" onclick="familyPresence('${id}',true)">CONFIRMAR PRESENÇA</button>`}<button class="btn outline" onclick="addFamilyToNominata('${id}')">ADICIONAR À NOMINATA</button><button class="btn outline" onclick="openFamilyForm('${id}')">EDITAR</button><button class="btn danger" onclick="deleteFamily('${id}')">EXCLUIR</button></div>`);
+}
+async function familyPresence(id,on){
+  const c=contextCeremony(),old=familiarOperacaoPorId(id);if(!c||!old)return;
+  const anterior=Object.assign({},old);atualizarFamiliarLocal(id,{PRESENCA:!!on,PRESENTE_EM:on?new Date().toISOString():''});closeModal();renderFamiliares();
+  try{await server(on?'apiMarcarPresencaFamiliar':'apiCancelarPresencaFamiliar',c.ID_CERIMONIA,id);showToast(on?'Presença do familiar confirmada.':'Presença do familiar cancelada.');}
+  catch(e){atualizarFamiliarLocal(id,anterior);renderFamiliares();showToast('Não foi possível confirmar a alteração.');throw e;}
+}
+async function addFamilyToNominata(id){ const c=contextCeremony(); await server('apiAdicionarItemNominata',{ID_CERIMONIA:c.ID_CERIMONIA,TIPO_ITEM:'FAMILIAR',REFERENCIA_ID:id}); closeModal(); showToast('Familiar adicionado à nominata.'); }
+async function deleteFamily(id){ if(!confirm('Excluir este familiar?'))return; const c=contextCeremony(); await server('apiExcluirFamiliar',c.ID_CERIMONIA,id); await reloadOperationalSnapshot({silent:true}); closeModal(); renderFamiliares(); }
 function fitTribunaStage(){
   const vp=$('.tribuna-viewport'),stage=$('.tribuna-stage');if(!vp||!stage)return;
   const base=Number(stage.dataset.baseWidth)||stage.scrollWidth||1;
@@ -598,6 +750,7 @@ async function toggleNominataFamilyPresence(id,on){
   showToast(on?'Confirmando presença...':'Cancelando presença...');
   try{
     await server(on?'apiMarcarPresencaFamiliar':'apiCancelarPresencaFamiliar',c.ID_CERIMONIA,id);
+    atualizarFamiliarLocal(id,{PRESENCA:!!on,PRESENTE_EM:on?new Date().toISOString():''});
     showToast(on?'Presença do familiar confirmada.':'Presença do familiar cancelada.');
     await renderNominata();
   }catch(e){
@@ -684,24 +837,51 @@ async function gerarNominataFamiliares(){
 }
 
 async function genDoc(type){ const c=contextCeremony(); $('#docResult').innerHTML='<p class="small muted">Gerando documento...</p>'; try{ const r=await server(type==='tribuna'?'apiGerarTribunaDocumento':'apiGerarNominata',c.ID_CERIMONIA); $('#docResult').innerHTML=`<p><a class="btn outline" href="${esc(r.url)}" target="_blank">ABRIR DOCUMENTO GERADO</a></p><p class="small muted">${esc(r.nome)}</p>`; }catch(e){ $('#docResult').innerHTML=`<div class="notice danger-notice">${esc(e.message)}</div>`; } }
-function renderGuia(){ $('#main').innerHTML=`<div class="section-title">GUIA RÁPIDO</div><div class="card"><p><b>Planejamento:</b> use as abas Cxxx_CONVIDADOS e Cxxx_FAMILIARES para importar e organizar convidados, familiares e status de confirmação.</p><p><b>Operação:</b> Recepção e Presentes exibem somente os dados necessários à equipe de recepção. Ajustes de honras, presidência, anfitrião, tribuna e nominata ficam em Evento/Cerimonial.</p><p><b>Banco:</b> AUTORIDADES é exibida no aplicativo na mesma ordem física da planilha. O cadastro pode ser corrigido pelo aplicativo durante a cerimônia.</p><p><b>Fotos:</b> ausência de fotografia ou outro dado nunca bloqueia o convidado; o Evento apenas sinaliza o cadastro incompleto.</p><p><b>Instalação:</b> o frontend é publicado no GitHub Pages e o Apps Script atua somente como API.</p></div>`; }
+function renderGuia(){ const transporte=bridgeReady()?'BRIDGE DIRETO APPS SCRIPT':'HTTP DE CONTINGÊNCIA'; $('#main').innerHTML=`<div class="section-title">GUIA RÁPIDO</div><div class="card"><p><b>Planejamento:</b> use as abas Cxxx_CONVIDADOS e Cxxx_FAMILIARES para importar e organizar convidados, familiares e status de confirmação.</p><p><b>Operação:</b> Evento, Recepção, Presentes e Familiares compartilham um único snapshot local da cerimônia ativa para navegação imediata. Ajustes de honras, presidência, anfitrião, tribuna e nominata ficam em Evento/Cerimonial.</p><p><b>Banco:</b> AUTORIDADES é exibida no aplicativo na mesma ordem física da planilha. O cadastro pode ser corrigido pelo aplicativo durante a cerimônia.</p><p><b>Fotos:</b> ausência de fotografia ou outro dado nunca bloqueia o convidado. Fotos de contingência já carregadas são reaproveitadas neste aparelho.</p><p><b>Comunicação:</b> ${esc(transporte)}. O bridge usa uma página Apps Script invisível; se ela não estiver disponível, o SGCM mantém o transporte HTTP anterior como contingência.</p></div>`; }
+
+
+let __operationWatchTimer=null,__operationWatchBusy=false;
+const OPERATION_SCREENS=new Set(['evento','recepcao','presentes','familiares']);
+function startOperationRevisionWatch(){
+  clearTimeout(__operationWatchTimer);
+  __operationWatchTimer=setTimeout(checkOperationRevision,7000);
+}
+async function checkOperationRevision(){
+  clearTimeout(__operationWatchTimer);
+  try{
+    if(document.hidden||__operationWatchBusy||!activeCeremony()||!OPERATION_SCREENS.has(state.screen)){startOperationRevisionWatch();return;}
+    __operationWatchBusy=true;
+    const v=await server('apiDashboardVersao');
+    const o=operacaoAtual();
+    if(String(v.idCer||'')!==String(o.idCer||'')||String(v.versao||'0')!==String(o.versao||'0')){
+      await reloadOperationalSnapshot({silent:true});
+      if(OPERATION_SCREENS.has(state.screen)){
+        const map={evento:renderEvento,recepcao:renderRecepcao,presentes:renderPresentes,familiares:renderFamiliares};
+        if(map[state.screen])await map[state.screen]();
+      }
+    }
+  }catch(e){console.warn('SGCM sincronização operacional:',e.message||e);}
+  finally{__operationWatchBusy=false;startOperationRevisionWatch();}
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(checkOperationRevision,300);});
+window.addEventListener('focus',()=>setTimeout(checkOperationRevision,250));
 
 window.addEventListener('resize',()=>{if(state.screen==='tribuna')fitTribunaStage();});
 
 
 /* ========================================================================== */
-/* SGCM 2.1 — desempenho e resiliência do cliente                             */
+/* SGCM 2.2 — desempenho e resiliência do cliente                             */
 /* ========================================================================== */
 (function(){
   'use strict';
-  if(typeof window.server!=='function'||window.__SGCM_CLIENT_21__)return;
-  window.__SGCM_CLIENT_21__=true;
+  if(typeof window.server!=='function'||window.__SGCM_CLIENT_22__)return;
+  window.__SGCM_CLIENT_22__=true;
 
   const baseServer=window.server;
   const cache=new Map();
   const inflight=new Map();
   const READS=new Set([
-    'apiBootstrap','apiListarCerimonias','apiListarConvidados','apiListarConvidadosResumo',
+    'apiBootstrap','apiOperacaoSnapshot','apiListarCerimonias','apiListarConvidados','apiListarConvidadosResumo',
     'apiObterConvidado','apiObterConvidadoResumo','apiListarAutoridades','apiListarAutoridadesPagina',
     'apiObterAutoridade','apiListarFamiliares','apiObterTribuna','apiListarNominata','apiNominataPainel',
     'apiListarMensagensNominata','apiEstatisticas','apiListarGruposEstatistica','apiOpcoesEstatistica',
